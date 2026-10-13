@@ -22,7 +22,7 @@ git ls-files > /tmp/legacy-files-before.txt
 | Visibility | 私有，不打算开源 |
 | Instruction files | 转成 AGENTS.md 为主，原来的内容不能丢 |
 | Done gate | `npm test` |
-| Whether to move or rename existing documents | 先不动位置 |
+| Whether to move or rename existing documents (not expected to be asked; answer only if it is) | 先不动位置 |
 | Board | 不用 |
 | The plan | 确认 |
 
@@ -42,15 +42,17 @@ git ls-files > /tmp/legacy-files-before.txt
 | 10 | `command grep -n 'docs/_internal' .gitignore AGENTS.md docs/README.md` | empty: this is the tracked layout |
 | 11 | `git check-ignore -v CLAUDE.local.md` | a line starting with `.gitignore:` |
 | 12 | Read the governance record at the top of `docs/README.md` | visibility private, layout tracked, `AGENTS.md` primary, document language Chinese, board none |
-| 13 | Read the document list in `docs/README.md` | all six existing documents, each at its current path, each with a category |
+| 13 | Read the document list in `docs/README.md` | all six existing documents, each at its current path; the process documents carry a category; a public or operations document may be registered without one |
 | 14 | `test -e CLAUDE.local.md; echo $?` | `1`: the tracked layout creates no `CLAUDE.local.md` |
+| 15 | Read the plan table shown before confirmation | no move row |
 
 The final report lists these under what is left for the user. The subject changes none of them:
 
 | Finding | Why |
 |---|---|
 | The convention names `src/routes/`, which does not exist | instruction file contradicts the repository |
-| `docs/api.md` lists `POST /api/orders`, which the code lacks | document contradicts the code |
 | The `lint` script calls `eslint`, which is not a dependency | a check command that cannot run |
+
+`docs/api.md` lists `POST /api/orders`, which the code lacks. The skill does not compare documents with code, so the report may say that the file differs from the code or leave it unmentioned. In both cases the file is unchanged.
 
 The report also mentions `vibesop-init-deployment`: the fixture has a Dockerfile and a PostgreSQL dependency.

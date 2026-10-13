@@ -73,7 +73,10 @@ Local notes:
 
 Companion suggestions in the report:
 
+The checker first runs `ls ~/.claude/skills ~/.agents/skills 2>/dev/null` to see what is installed on the machine.
+
 | Run | Expected |
 |---|---|
-| Chinese | Chinese variants where one exists (`superpowers-zh`, `humanizer-zh`) |
-| English | no `-zh` variant |
+| Both | items already installed on the machine are not recommended |
+| Chinese | among the recommended items, one that has a Chinese variant is named by its Chinese package name (for example `superpowers-zh`, `humanizer-zh`) |
+| English | among the recommended items, one that has a Chinese variant is named by its original name; no `-zh` name appears |

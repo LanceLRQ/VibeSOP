@@ -35,6 +35,8 @@ The subject session never reads the scenario file. A subject that has seen the e
 - Answer only what the subject asks. Take the answer from the scenario's answer table and phrase it in the same language as the opening line.
 - When the subject asks something the table does not cover, accept its default. When it offers no default, say "skip".
 - When the subject shows a plan and asks for confirmation, confirm. Before confirming, list the files in the fixture: nothing may have been written yet.
+- When a driver agent plays the user, turn off the subject session's question tool, or tell the subject to ask in plain text. On some clients that tool shows the question to the real person at the keyboard, and those answers do not follow the answer table.
+- `grep -P` is not available in the stock macOS grep. Checks for Han characters use `perl -CSD -ne 'print "$ARGV:$.: $_" if /\p{Han}/' <files>`.
 - Never ask the subject to switch language. Count every reply that arrives in the wrong language.
 
 ## Checks shared by every scenario

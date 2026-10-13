@@ -97,7 +97,7 @@ Common keys: `mit`, `apache-2.0`, `gpl-3.0`, `agpl-3.0`, `bsd-3-clause`, `bsd-2-
 
 ## 8. Conclusion line
 
-Write `Ready to publish: yes` or `Ready to publish: no`, followed by the blockers. Write the line in the conversation language.
+End the report with one line in the conversation language: whether the repository is ready to publish, yes or no, followed by the blockers. `references/glossary.md` gives the Chinese wording of that line.
 
 ## 9. Global ignore files
 

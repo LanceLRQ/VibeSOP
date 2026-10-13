@@ -2,6 +2,17 @@
 
 Skill: `vibesop-init-project`. Fixture: `going-public`, a small Go project with two commits. `CLAUDE.local.md` and `docs/_internal/discussion/2026-07-01-decisions.md` were committed before the ignore rules were added, so they are tracked and in the history. The README links to the internal document. There is no `LICENSE`.
 
+## How it is run
+
+This scenario is run in two ways, and the two results are recorded separately.
+
+| Run | Opening line | Record |
+|---|---|---|
+| (a) Natural trigger | as written below | only whether the skill was loaded in the first turn; if it was not, stop the run and record the first reply |
+| (b) By name | the opening line prefixed by `/vibesop-init-project ` | all checks in this file apply to this run |
+
+Without the skill loaded, nothing in this file is under test.
+
 ## The user says
 
 ```
@@ -20,7 +31,7 @@ A Chinese run uses the same fixture:
 |---|---|
 | License | MIT |
 | Copyright holder | Example Labs |
-| May the internal documents and `CLAUDE.local.md` be public | no |
+| May the internal documents and `CLAUDE.local.md` be public (not expected to be asked; answer only if it is) | no |
 | Rewriting the history | explain the options, I will run it myself |
 | Remote URL | skip |
 | Board | none |

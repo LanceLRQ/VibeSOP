@@ -1,6 +1,6 @@
 ---
 name: vibesop-init-project
-description: Use when starting a new project, bringing an existing repository under documentation governance, preparing a repository to go public, or checking that internal docs and AI instruction files are set up and not leaking. Involves AGENTS.md, CLAUDE.md, docs/_internal, public vs internal docs, .gitignore isolation, LICENSE. 中文触发：初始化项目、新项目起步、老项目接入治理、文档分区、内部文档隔离、开源准备、泄露检查。
+description: Use when a repository is about to be made public or open-sourced, before the visibility switch or the first public push, while private notes, local config or internal docs may still be tracked or sit in the git history and no LICENSE is chosen; when starting a new project; when bringing an existing repository under documentation governance; or when checking that internal docs and AI instruction files are set up and not leaking. Involves AGENTS.md, CLAUDE.md, docs/_internal, public vs internal docs, .gitignore isolation, LICENSE. 中文触发：仓库准备公开、开源前准备、开源准备、初始化项目、新项目起步、老项目接入治理、文档分区、内部文档隔离、泄露检查。
 ---
 
 # VibeSOP: init-project
@@ -46,6 +46,8 @@ This file is in English so that anyone can review it. That says nothing about th
 
 ### 2. Report and name the entry
 
+When the conversation is in Chinese, read `references/glossary.md` before writing this first reply.
+
 Tell the user what was found and what is missing, as a short list. Then name the entry and the reason.
 
 | Entry | Condition |
@@ -59,7 +61,14 @@ When the `# >>> vibesop` block exists but the index does not (a fresh clone of a
 
 ### 3. Decide
 
-Ask in batches of at most four. Use the client's question tool when it has one, otherwise a numbered list. Each question carries a default and a one-line reason. State the facts from step 1; ask only for the items below.
+The questions of a run are the rows of the table below whose *Ask when* holds. Facts from step 1 are stated, and the user corrects them if they are wrong.
+
+1. List the D numbers that apply to this run, followed by any question the reference of the entry tells you to ask. That list is the whole questionnaire.
+2. Ask them in table order, four to a batch, with D6 moved to the end. One numbered item carries one decision, so nine items make batches of 4, 4 and 1. One message carries one batch; the next batch goes out after the answers arrive.
+3. Each question carries its default and a one-line reason. The default is what an unanswered question resolves to. A row whose default is `skip` is asked like every other row.
+4. Use the client's question tool when it has one, otherwise a numbered list.
+
+Anything else that seems to need deciding, such as scaffolding, libraries or code structure, goes into the Next part of the report as a suggestion.
 
 | # | Decision | Options, default first | Ask when |
 |---|---|---|---|
@@ -85,7 +94,13 @@ Default to undecided because isolating now costs one ignore rule, while removing
 
 ### 4. Plan table
 
-Show one table and wait for an explicit yes. A changed answer means an updated table and a new confirmation.
+Show the decisions, then one table, and wait for an explicit yes. A changed answer means an updated table and a new confirmation.
+
+| Decision | Value | Source |
+|---|---|---|
+| each D number on the list of step 3 | the value this run uses | the user's answer, or the default the user left standing |
+
+A number on the list that was never put to the user is asked now, before the table is shown.
 
 | Path or command | Action | Note |
 |---|---|---|
@@ -93,7 +108,7 @@ Show one table and wait for an explicit yes. A changed answer means an updated t
 
 Three rules shape the rows for files that already exist:
 
-- **A document stays where it is.** The index registers it at its current path. A move is a separate row, proposed when the user asked to reorganise, and done with `git mv`.
+- **A document stays where it is.** The index registers it at its current path. A move is a separate row, done with `git mv`, and it appears for a file the user named or a destination the user gave. Documents that would sit better elsewhere go into the report as a suggestion.
 - **An instruction file keeps every line.** Conversion moves text between files without rewording it. Lines that contradict the repository go into the report.
 - **Onboarding writes governance files only**: index, instruction files, ignore block, and `LICENSE` or `README` when missing. Material worth extracting from existing documents goes into the report as a suggestion.
 
@@ -145,7 +160,7 @@ Report in five parts:
 1. **Done**: files written and commands run, verbatim.
 2. **Skipped**: what and why.
 3. **Verification**: each row with pass or fail.
-4. **Left for you**: what to review; the first commit as two separate commands, `git add` then `git commit`; the push command with the branch name and remote that `git branch --show-current` and `git remote -v` print; anything found that this run did not change.
+4. **Left for you**: what to review; the first commit as two separate commands, `git add` then `git commit -m "<type>: <summary>"`. The user makes this commit as its author, so the message is that one line and the hand-over ends there: attribution or co-author lines that a client asks an agent to add belong to commits the agent makes itself, and this is not one of them; the push command with the branch name and remote that `git branch --show-current` and `git remote -v` print; anything found that this run did not change.
 5. **Next**: relevant companions that are not installed, with their install commands from `references/companions.md`; `vibesop-init-deployment` when deployable parts were detected; kanban-hub when it is not installed.
 
 ## Red lines

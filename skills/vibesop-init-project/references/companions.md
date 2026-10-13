@@ -11,7 +11,7 @@ Read this when step 1 detects companion tools and when you write the Next part o
 ## 2. Presentation rules
 
 - List the items that are not installed and relate to this project.
-- Choose the variant that matches the conversation language.
+- Choose the variant that matches the conversation language and write its own name, `superpowers-zh` in a Chinese conversation and `superpowers` in an English one.
 - Give each item one sentence of purpose.
 - The user runs the install commands.
 - Every install command names a repository from this file. A search by name returns unrelated repositories that share the name.

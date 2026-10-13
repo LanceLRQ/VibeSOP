@@ -12,7 +12,7 @@ List every document step 1 found. Use one table.
 
 ## 2. Register in place
 
-The Documents section of the index lists each document at its current path, grouped by category. A move happens when the user asks to reorganise. Each move is its own row in the plan table and runs with `git mv`. The row states that `git mv` stages the rename.
+The Documents section of the index lists each document at its current path, grouped by category. A wish to tidy up, stated in general terms, leaves every document in place. Each move the user named is its own row in the plan table and runs with `git mv`. The row states that `git mv` stages the rename.
 
 ## 3. Categories the project already has
 

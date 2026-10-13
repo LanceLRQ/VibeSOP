@@ -39,10 +39,10 @@ Replace `<deploy>` and `<scripts>` with the directories the run chose (the defau
 | 2 | `ls <scripts>` | a dev script and a production script |
 | 3 | the loop under this table | no `FAIL` line |
 | 4 | `command grep -rnE '\{\{[A-Z_]+\}\}' <deploy> <scripts>` | empty |
-| 5 | `command grep -rnE -e '^# >>> [A-Z_]+' -e '^# <<< [A-Z_]+' <deploy> <scripts>` | empty: optional blocks were kept or removed together with their markers |
+| 5 | `command grep -rnE -e '^# >>> [A-Z_]+' -e '^# <<< [A-Z_]+' <deploy> <scripts>` | empty: no generated file carries a marker line |
 | 6 | `test -f <deploy>/README.md; echo $?` | `0`: the decision table is written down |
 | 7 | `git check-ignore -v .env` | a line naming an ignore rule |
-| 8 | `git status --short` | only new and modified files; nothing staged |
+| 8 | `git status --short` | only new and modified files; a deleted tracked file shows as ` D` (unstaged); no entry has a letter in the first column |
 
 ```bash
 for f in <scripts>/*.sh; do bash -n "$f" || echo "FAIL $f"; done
@@ -52,8 +52,8 @@ Process, read from the conversation:
 
 | Item | Expected |
 |---|---|
-| The service inventory | shown as a table and confirmed before any question |
-| The first question after that | the release route, asked alone |
+| The first message | reports the service inventory as a table for correction |
+| The first question asked | the release route, asked alone; it may be in the same message as the inventory |
 | The questions | in batches of four at most, each with a recommended default and a reason |
 | The decision table | shown and confirmed before any file is written; skipped modules are named with the reason |
 | The hand-over | lists what the user must do: fill `.env`, prepare the server, set up the proxy or domain |

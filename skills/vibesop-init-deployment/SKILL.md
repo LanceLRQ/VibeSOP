@@ -48,7 +48,7 @@ Read the project and change nothing. Establish:
 
 ### 2. Report and confirm the service inventory
 
-Tell the user the findings in one table and ask for corrections. If the service inventory is wrong, everything after it is wrong.
+Tell the user the findings in one table and ask for corrections. If the service inventory is wrong, everything after it is wrong. Question 0.1 may close the same message.
 
 ### 3. Ask in batches
 
@@ -58,17 +58,20 @@ Do not treat detected values as confirmed values. Detection results are **recomm
 
 ### 4. Confirm the decision table
 
-Collect all answers into a decision table: environment / service / image name / port / data directory / config location / image registry / optional modules, plus **every skipped module and the reason**. Wait for the user to confirm before touching anything.
+Collect all answers into a decision table: environment / service / image name / port / data directory / config location / image registry / optional modules, plus **every skipped module and the reason**. A tracked file that will be deleted or moved gets a row of its own, with the action written as delete or move. Wait for the user to confirm before touching anything.
+
+The confirmed table is what gets generated. When generation shows that a value in it has to change, or that a value is missing, stop, show the changed rows, and wait for a new confirmation.
 
 ### 5. Generate
 
 Generate from `templates/`. The placeholder reference is at the end of `references/questionnaire.md`. The structure and rules of each environment are in `references/environments.md`. Optional modules are in `references/optional-modules.md`.
 
 - The open-source route uses `install.sh.template`, `docker-compose.release.yml.template` and the two `github-actions-dockerhub*.yml.template` files. Generation and verification requirements are in `references/open-source-route.md`
-- In a template, the text between `# >>> NAME` and `# <<< NAME` is an optional block. When the user did not choose the matching feature, delete the whole block, marker lines included
+- In a template, the text between `# >>> NAME` and `# <<< NAME` is an optional block. A generated file carries no marker lines: for a chosen feature, keep the content of the block and delete its two marker lines; for a feature the user did not choose, delete the content together with them
+- Helper files used while generating go into a temporary directory outside the repository and are deleted before delivery
 - There is no template for the Dockerfile. Write it for the detected tech stack, following "Dockerfile conventions" in `references/environments.md`
 - Write the confirmed decision table into `<deploy directory>/README.md` for later sessions to read
-- The script and compose templates carry Chinese comments and Chinese user-facing strings (echo output, prompts, help text) in this release. When the document language is not Chinese, translate those comments and strings while filling each template in. Commands, variable names and block marker names stay unchanged. Step 6 then checks every script with `bash -n`.
+- The script and compose templates carry Chinese comments and Chinese user-facing strings (echo output, prompts, help text) in this release. When the document language is not Chinese, translate those comments and strings while filling each template in. Commands and variable names stay unchanged. Step 6 then checks every script with `bash -n`.
 
 ### 6. Verify
 
@@ -80,7 +83,8 @@ docker compose -f <each compose file> config -q      # needs a .env first; with 
                                                      # for a compose file that references env_file or secret files, run the matching script's init first
 git check-ignore -v <data directories inside the repo> <secret files> <.env>   # every item must match an ignore rule; paths outside the repo do not apply, so confirm instead that they are not under the repository directory
 git add -n <each *.example file>                     # every item must be listed: example files are committed, and the ignore rules must not catch them by mistake
-command grep -rnE '\{\{[A-Z_]+\}\}' <deploy directory> <script directory>   # no placeholder may remain; `command` bypasses shell aliases that skip ignored files
+command grep -rnE -e '\{\{[A-Z_]+\}\}' -e '^# (>>>|<<<) [A-Z_]+' <deploy directory> <script directory>   # no placeholder and no marker line may remain; `command` bypasses shell aliases that skip ignored files
+git status --short                                   # nothing staged: every change is an unstaged or untracked entry
 ```
 
 Go through the list in `references/pitfalls.md`.
@@ -140,6 +144,7 @@ Ask whether images are pushed to Alibaba Cloud ACR. If yes, ask "has ACR already
 - Do not decide silently for the user: a value that was never asked is not written to disk
 - Passwords, keys and tokens go only into ignored files. Only `*.example` templates are committed to git
 - Do not run `docker push` automatically, do not log in to a server, do not change anything live, do not run git commit or push. Generating files is where you stop. The rest is for the user, or waits for the user's explicit instruction
+- Git is used read-only: `status`, `ls-files`, `check-ignore`, `log`, `add -n`. Files are created, changed and deleted with ordinary file operations, so every change stays unstaged in the working tree for the user to review
 - When gray shares the production database, do not generate any migration guidance that would break the old version
 
 ## Common mistakes
