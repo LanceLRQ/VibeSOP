@@ -1,0 +1,50 @@
+# {{PROJECT_SLUG}} — 本地开发编排
+# 源码以 bind mount 进容器并由项目自带的热重载工具运行；全部持久化数据落在 ./local（已 ignore）。
+# 项目没有数据库时，把下面标为 DB 的可选区块整块删除（连同两行标记）。
+
+services:
+  # ---- 按服务清单复制本段；在宿主机直接运行更顺手的服务（常见于前端）可以不放进来 ----
+  {{SERVICE}}:
+    # 开发镜像只装工具链、不拷源码，构建上下文就是它自己的目录。
+    # 镜像构建时需要读依赖清单的，改成：build: { context: ../.., dockerfile: {{DEPLOY_DIR}}/dev/{{SERVICE}}/Dockerfile }
+    build: ./{{SERVICE}}
+    image: {{PREFIX}}-dev-{{SERVICE}}:latest
+    container_name: {{PREFIX}}-dev-{{SERVICE}}
+    working_dir: /app
+    volumes:
+      # 路径相对本文件；部署目录不是项目根下的单层目录时相应调整 ../.. 的层数
+      - ../../{{SERVICE_SRC}}:/app
+    ports:
+      - "{{HOST_PORT}}:{{CONTAINER_PORT}}"
+    # 应用用环境变量配置时：真实文件由 dev.sh init 从 <服务>.env.example 复制生成
+    # env_file:
+    #   - ./secrets/{{SERVICE}}.env
+    environment:
+      - TZ=Asia/Shanghai
+# >>> DB
+    depends_on:
+      - database
+
+  # ---- 有状态依赖：与生产使用相同的大版本 ----
+  database:
+    image: {{DB_IMAGE}}
+    container_name: {{PREFIX}}-dev-database
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    volumes:
+      - ./local/db_data:{{DB_DATA_PATH}}
+      - ./db-init:/docker-entrypoint-initdb.d:ro
+    secrets:
+      - postgres_password
+      - app_password
+    ports:
+      - "{{DB_HOST_PORT}}:5432"
+
+secrets:
+  postgres_password:
+    file: ./secrets/postgres_password.txt
+  app_password:
+    file: ./secrets/app_password.txt
+# <<< DB

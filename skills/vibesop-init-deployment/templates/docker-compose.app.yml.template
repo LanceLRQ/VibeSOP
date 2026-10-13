@@ -1,0 +1,50 @@
+# {{PROJECT_SLUG}} — {{ENV_NAME}} 应用编排
+# 数据库/中间件在 docker-compose.db.yml 中独立管理，应用启停不影响它们。
+# 宿主机相对路径按本文件所在目录解析。DEPLOY_DATA_DIR / DEPLOY_SECRETS_DIR 由管理脚本导出，可在 .env 覆盖。
+# 服务之间互访一律用 container_name，不用服务名：灰度会加入同一个网络且服务同名，服务名会在两套容器间轮询。
+
+services:
+  # ---- 按服务清单复制本段，每个服务一份 ----
+  {{SERVICE}}:
+    # tag 固定为 latest：发布与回滚都通过在本机重新打 latest 标签完成（见管理脚本的 image pull / promote）
+    image: ${REGISTRY_NAMESPACE:-local}/{{PROJECT_SLUG}}-{{SERVICE}}:latest
+    container_name: {{PREFIX}}-{{ENV_NAME}}-{{SERVICE}}
+    restart: unless-stopped
+    ports:
+      # 绑定地址是有意的选择，原因见部署 README 的决策表
+      - "{{BIND_ADDR}}{{HOST_PORT}}:{{CONTAINER_PORT}}"
+    volumes:
+      # 只读：配置（应用用配置文件时）
+      - ${DEPLOY_DATA_DIR:-{{DATA_ROOT}}}/config:/app/config:ro
+      # 可写：属主须为容器内运行用户（uid {{RUN_UID}}）
+      - ${DEPLOY_DATA_DIR:-{{DATA_ROOT}}}/logs:/app/logs
+    # 应用用环境变量配置时：每个服务一个 env 文件，放密钥目录，仓库里只留 <服务>.env.example
+    # env_file:
+    #   - ${DEPLOY_SECRETS_DIR:-{{SECRETS_DIR}}}/{{SERVICE}}.env
+    environment:
+      - TZ=Asia/Shanghai
+    # 必填变量用 ${VAR:?提示语}，缺失时启动即报错
+    # healthcheck:
+    #   test: ["CMD-SHELL", "<按服务的健康检查接口填写>"]
+    #   interval: 30s
+    #   timeout: 10s
+    #   retries: 3
+    #   start_period: 30s
+
+  # ---- 与上面某个服务共用镜像的后台任务（队列消费者、定时任务）：同镜像、覆盖启动命令、不映射端口 ----
+  # worker:
+  #   image: ${REGISTRY_NAMESPACE:-local}/{{PROJECT_SLUG}}-{{SERVICE}}:latest
+  #   container_name: {{PREFIX}}-{{ENV_NAME}}-worker
+  #   restart: unless-stopped
+  #   command: ["<后台任务的启动命令>"]
+
+# 有独立数据库 compose 时：加入它创建的固定名网络
+networks:
+  default:
+    name: {{PREFIX}}-{{ENV_NAME}}-network
+    external: true
+
+# 没有独立数据库 compose 时改为由本文件创建网络（去掉 external）：
+# networks:
+#   default:
+#     name: {{PREFIX}}-{{ENV_NAME}}-network

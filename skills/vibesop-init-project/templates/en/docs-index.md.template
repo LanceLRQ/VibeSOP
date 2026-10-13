@@ -1,0 +1,39 @@
+# {{INDEX_TITLE}}
+
+<!-- >>> LAYOUT_ISOLATED -->
+This directory is git-ignored and exists only on this machine. Back it up or sync it yourself.
+<!-- <<< LAYOUT_ISOLATED -->
+<!-- >>> LAYOUT_TRACKED -->
+Process docs in this directory are committed with the code.
+<!-- <<< LAYOUT_TRACKED -->
+
+## Governance record
+
+| Item | Value |
+|---|---|
+| Visibility | {{VISIBILITY}} |
+| Layout | {{LAYOUT}} |
+| Instruction files | {{INSTRUCTION_FILES}} |
+| Document language | {{DOC_LANGUAGE}} |
+| Board | {{BOARD}} |
+| Set up | {{SETUP_DATE}} |
+
+## Categories
+
+A directory is created when its first file is written. Update its status here in the same step.
+
+| Directory | Answers | File name | Status |
+|---|---|---|---|
+| `research/` | What did we look into? | `NN-topic.md` | not created |
+| `discussion/` | Why did we decide this? | `YYYY-MM-DD-topic.md` | not created |
+| `specs/` | What are we building? | `YYYY-MM-DD-topic.md` | not created |
+| `plans/` | How do we deliver it? | `YYYY-MM-DD-topic.md` | not created |
+| `audit/` | Was it done right? | `AUDIT-YYYY-MM-DD-topic.md` | not created |
+| `reference/` | What do we look up again and again? | free | not created |
+| `ui/` | What does it look like? | free | not created |
+<!-- >>> DOCUMENTS -->
+
+## Documents
+
+{{DOCUMENT_ROWS}}
+<!-- <<< DOCUMENTS -->

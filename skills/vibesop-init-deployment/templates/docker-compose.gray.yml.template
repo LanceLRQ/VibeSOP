@@ -1,0 +1,30 @@
+# {{PROJECT_SLUG}} — 灰度编排
+# 与生产同机并行：使用 gray 标签的镜像，加入生产网络，不包含数据库。
+# 端口规则：生产宿主机端口 + 偏移（见部署 README 的决策表）。
+# 与生产在同一网络且服务同名：访问数据库、访问其他服务一律用 container_name，不用服务名。
+
+services:
+  # ---- 按服务清单复制本段，每个服务一份 ----
+  {{SERVICE}}:
+    image: ${REGISTRY_NAMESPACE:-local}/{{PROJECT_SLUG}}-{{SERVICE}}:gray
+    container_name: {{PREFIX}}-gray-{{SERVICE}}
+    restart: unless-stopped
+    ports:
+      - "{{BIND_ADDR}}{{GRAY_HOST_PORT}}:{{CONTAINER_PORT}}"
+    volumes:
+      # 灰度有独立的配置与日志目录；配置从生产复制后只改必要项
+      - {{GRAY_DATA_ROOT}}/config:/app/config:ro
+      - {{GRAY_DATA_ROOT}}/logs:/app/logs
+      # 用户上传等「数据库里存着引用」的目录：共用生产库时要挂生产的同一个目录，否则两边文件对不上
+    # env_file:
+    #   - ${DEPLOY_SECRETS_DIR:-{{SECRETS_DIR}}}/{{SERVICE}}.gray.env
+    environment:
+      - TZ=Asia/Shanghai
+    # 共用数据库/队列时，后台任务默认不在灰度运行：
+    #   后台任务是独立容器 → 本文件里不写那个服务
+    #   后台任务与主进程在同一容器（进程管理器）→ 在这里挂一份禁用它们的进程管理配置
+
+networks:
+  default:
+    name: {{PREFIX}}-prod-network
+    external: true

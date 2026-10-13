@@ -1,0 +1,39 @@
+# {{INDEX_TITLE}}
+
+<!-- >>> LAYOUT_ISOLATED -->
+本目录已被 git 忽略，只存在于这台机器上。请自行备份或同步。
+<!-- <<< LAYOUT_ISOLATED -->
+<!-- >>> LAYOUT_TRACKED -->
+本目录中的过程文档随代码一起提交。
+<!-- <<< LAYOUT_TRACKED -->
+
+## 治理记录
+
+| 项 | 值 |
+|---|---|
+| 可见性 | {{VISIBILITY}} |
+| 形态 | {{LAYOUT}} |
+| 指令文件 | {{INSTRUCTION_FILES}} |
+| 文档语言 | {{DOC_LANGUAGE}} |
+| 进度看板 | {{BOARD}} |
+| 接入日期 | {{SETUP_DATE}} |
+
+## 分类
+
+目录在写入第一个文件时创建，并在同一步骤更新它在这里的状态。
+
+| 目录 | 回答的问题 | 命名 | 状态 |
+|---|---|---|---|
+| `research/` | 调研了什么 | `NN-主题.md` | 未建 |
+| `discussion/` | 为什么这么定 | `YYYY-MM-DD-主题.md` | 未建 |
+| `specs/` | 要做成什么 | `YYYY-MM-DD-主题.md` | 未建 |
+| `plans/` | 怎么落地 | `YYYY-MM-DD-主题.md` | 未建 |
+| `audit/` | 做得对不对 | `AUDIT-YYYY-MM-DD-主题.md` | 未建 |
+| `reference/` | 反复要查的资料 | 自由 | 未建 |
+| `ui/` | 长什么样 | 自由 | 未建 |
+<!-- >>> DOCUMENTS -->
+
+## 现有文档
+
+{{DOCUMENT_ROWS}}
+<!-- <<< DOCUMENTS -->

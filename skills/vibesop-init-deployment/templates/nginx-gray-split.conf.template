@@ -1,0 +1,49 @@
+# {{PROJECT_SLUG}} — 生产 / 灰度 Cookie 分流（参考配置）
+# 放在最外层入口上（宿主机 Nginx / OpenResty，或内置的反代容器）。纯 Nginx 即可，不依赖 Lua。
+# 带有 Cookie {{GRAY_COOKIE}}=1 的请求进灰度，其余进生产。
+
+# ---- 每个对外服务一组 upstream + map（服务名含连字符时，map 变量名里换成下划线）----
+upstream prod_{{SERVICE}} { server 127.0.0.1:{{HOST_PORT}}; }
+upstream gray_{{SERVICE}} { server 127.0.0.1:{{GRAY_HOST_PORT}}; }
+
+map $cookie_{{GRAY_COOKIE}} $target_{{SERVICE}} {
+    "1"     gray_{{SERVICE}};
+    default prod_{{SERVICE}};
+}
+
+server {
+    listen 80;
+    server_name {{DOMAIN}};
+
+    client_max_body_size 100m;
+
+    # ---- 灰度开关：路径请换成不易猜到的名字。它只决定谁能看到灰度，不是安全边界 ----
+    location = /_gray/on {
+        add_header Set-Cookie "{{GRAY_COOKIE}}=1; Path=/; Max-Age=86400" always;
+        default_type text/plain;
+        return 200 "gray on (24h)\n";
+    }
+    location = /_gray/off {
+        add_header Set-Cookie "{{GRAY_COOKIE}}=; Path=/; Max-Age=0" always;
+        default_type text/plain;
+        return 200 "gray off\n";
+    }
+
+    # ---- 每个对外服务一个 location，路径前缀按项目路由填写 ----
+    location / {
+        proxy_pass http://$target_{{SERVICE}};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # WebSocket（不需要可删）
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 120s;
+        proxy_read_timeout 120s;
+    }
+}

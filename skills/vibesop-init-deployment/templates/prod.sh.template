@@ -1,0 +1,464 @@
+#!/bin/bash
+# {{PROJECT_SLUG}} — {{ENV_NAME}} 环境管理脚本
+# 用法: ./{{ENV_NAME}}.sh <命令>     不带参数显示帮助
+#
+# 可选区块以 "# >>> NAME" / "# <<< NAME" 包裹：REGISTRY（镜像仓库）、DB（自建数据库）、GRAY（灰度）。
+
+set -e
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/{{SCRIPT_TO_ROOT}}" && pwd)"
+
+# ============================================
+# 环境变量（DEPLOY_ENV_FILE 可覆盖路径）
+# ============================================
+# 相对路径按项目根解析，绝对路径原样使用（.env 可以放在仓库外）
+ENV_FILE="${DEPLOY_ENV_FILE:-{{ENV_FILE}}}"
+case "$ENV_FILE" in /*) ;; *) ENV_FILE="$PROJECT_ROOT/$ENV_FILE";; esac
+if [ -f "$ENV_FILE" ]; then
+  set -a
+  # shellcheck disable=SC1090
+  . "$ENV_FILE"
+  set +a
+fi
+
+# ============================================
+# 基础配置
+# ============================================
+PROJECT_SLUG="{{PROJECT_SLUG}}"
+PREFIX="{{PREFIX}}"
+ENV_NAME="{{ENV_NAME}}"
+# 拥有独立镜像的服务（构建/推送/拉取的对象）。与其他服务共用镜像的（如后台任务容器）不列在这里
+SERVICES=({{SERVICES}})
+TARGET_PLATFORM="{{TARGET_PLATFORM}}"
+# 应用容器内运行用户的默认 uid；0 表示容器内以 root 运行
+RUN_UID="{{RUN_UID}}"
+
+ENV_DIR="$PROJECT_ROOT/{{DEPLOY_DIR}}/$ENV_NAME"
+
+# 相对路径按 compose 文件所在目录解析，绝对路径原样使用
+resolve_path() {
+  case "$1" in
+    /*) echo "$1";;
+    *)  echo "$ENV_DIR/${1#./}";;
+  esac
+}
+# DEPLOY_DATA_DIR / DEPLOY_SECRETS_DIR 可在 .env 或环境里覆盖；解析后导出，compose 文件引用同名变量
+DATA_ROOT="$(resolve_path "${DEPLOY_DATA_DIR:-{{DATA_ROOT}}}")"
+SECRETS_DIR="$(resolve_path "${DEPLOY_SECRETS_DIR:-{{SECRETS_DIR}}}")"
+export DEPLOY_DATA_DIR="$DATA_ROOT" DEPLOY_SECRETS_DIR="$SECRETS_DIR"
+
+# 应用容器需要写入的目录（相对 DATA_ROOT），init 时创建并调整属主。
+# 写成 "目录" 用默认 RUN_UID；某个服务的 uid 不同时写成 "目录:uid"
+WRITABLE_DIRS=({{WRITABLE_DIRS}})
+# 只创建、不改属主的目录（相对 DATA_ROOT）：只读挂载的配置目录、
+# 以及数据库等第三方镜像的数据目录（它们启动时自行处理属主，不能 chown 给应用 uid）
+PLAIN_DIRS=({{PLAIN_DIRS}})
+# 需要生成随机密码的 secret 名（生成 <名>.txt）
+SECRET_NAMES=({{SECRET_NAMES}})
+
+INIT_LOCK_FILE="$ENV_DIR/.initialized"
+# 镜像命名空间：推送到仓库时即仓库命名空间；不使用仓库时固定为 local
+IMAGE_NS="${REGISTRY_NAMESPACE:-local}"
+VERSION="${VERSION:-$(git -C "$PROJECT_ROOT" describe --tags --always --dirty 2>/dev/null || echo latest)}"
+
+info()  { echo "[*] $*"; }
+ok()    { echo "[OK] $*"; }
+warn()  { echo "[!] $*" >&2; }
+die()   { echo "[X] $*" >&2; exit 1; }
+
+confirm() {
+  local answer
+  read -r -p "$1 [y/N]: " answer
+  case "$answer" in y|Y|yes) return 0;; *) return 1;; esac
+}
+
+# ============================================
+# 前置检查：Docker 可用性与目录属主
+# ============================================
+detect_compose() {
+  if docker compose version >/dev/null 2>&1; then
+    DC=(docker compose)
+  elif command -v docker-compose >/dev/null 2>&1; then
+    DC=(docker-compose)
+    warn "检测到旧版 docker-compose（兼容模式），建议升级到 docker compose 插件"
+  else
+    die "未找到 docker compose，请先安装 Docker Compose"
+  fi
+}
+
+owner_of() {
+  stat -c '%U' "$1" 2>/dev/null || stat -f '%Su' "$1"
+}
+
+preflight() {
+  command -v docker >/dev/null 2>&1 || die "未找到 docker 命令"
+  local out
+  if ! out=$(docker info 2>&1); then
+    case "$out" in
+      *"permission denied"*)
+        die "当前用户 $(id -un) 无权访问 Docker。请用 sudo 运行本脚本，或将该用户加入 docker 组（等同授予 root 权限）";;
+      *) die "Docker 不可用：$(echo "$out" | tail -1)";;
+    esac
+  fi
+  detect_compose
+
+  # root 可以操作任何属主的文件；非 root 时属主不符大概率会在后续步骤报权限错误，提前说清楚
+  if [ "$(id -u)" -ne 0 ]; then
+    local dir owner
+    for dir in "$PROJECT_ROOT" "$DATA_ROOT" "$SECRETS_DIR"; do
+      [ -e "$dir" ] || continue
+      owner=$(owner_of "$dir")
+      if [ "$owner" != "$(id -un)" ]; then
+        warn "$dir 属于 $owner 而当前用户是 $(id -un)；涉及写入的命令请用 sudo 运行，且不要混用不同用户操作这份部署"
+      fi
+    done
+  fi
+}
+
+compose_args() {
+  local file="$1" name="$2"
+  COMPOSE=("${DC[@]}")
+  [ -f "$ENV_FILE" ] && COMPOSE+=(--env-file "$ENV_FILE")
+  COMPOSE+=(-f "$file" -p "$name")
+}
+
+app_compose()  { compose_args "$ENV_DIR/docker-compose.$ENV_NAME.yml" "$PREFIX-$ENV_NAME"; }
+
+# 目标展开：all → 全部服务
+expand_targets() {
+  if [ -z "$1" ] || [ "$1" = "all" ]; then
+    echo "${SERVICES[@]}"
+  else
+    echo "$1"
+  fi
+}
+
+local_image() { echo "${IMAGE_NS}/${PROJECT_SLUG}-$1"; }
+
+# ============================================
+# 初始化（只执行一次）
+# ============================================
+init_env() {
+  if [ -f "$INIT_LOCK_FILE" ]; then
+    die "$ENV_NAME 环境已初始化过（$(cat "$INIT_LOCK_FILE")）。确需重来请先删除锁文件: $INIT_LOCK_FILE"
+  fi
+
+  info "[1/3] 创建目录"
+  local d entry uid name target
+  for d in "${PLAIN_DIRS[@]}"; do
+    mkdir -p "$DATA_ROOT/$d"
+  done
+  for entry in "${WRITABLE_DIRS[@]}"; do
+    mkdir -p "$DATA_ROOT/${entry%%:*}"
+  done
+
+  # 目录 700 挡住宿主机上的其他用户；文件 644 是有意的：
+  # 密钥以文件挂载进容器后，容器内进程常以镜像自带的 uid 运行（数据库镜像尤其如此），600 会让它读不到
+  info "[2/3] 生成密钥文件（已存在的跳过，明文不回显）"
+  mkdir -p "$SECRETS_DIR"
+  chmod 700 "$SECRETS_DIR"
+  for name in "${SECRET_NAMES[@]}"; do
+    target="$SECRETS_DIR/${name}.txt"
+    if [ -f "$target" ]; then
+      echo "  [-] 已存在: ${name}.txt"
+    else
+      openssl rand -base64 48 | tr -d '/+=\n' | head -c 32 > "$target"
+      chmod 644 "$target"
+      echo "  [*] 已生成: ${name}.txt"
+    fi
+  done
+
+  info "[3/3] 调整可写目录属主"
+  for entry in "${WRITABLE_DIRS[@]}"; do
+    d="${entry%%:*}"
+    case "$entry" in *:*) uid="${entry##*:}";; *) uid="$RUN_UID";; esac
+    if [ "$uid" = "$(id -u)" ]; then
+      echo "  [-] $d: 容器内用户与当前用户一致，无需调整"
+    elif [ "$(id -u)" -eq 0 ]; then
+      chown -R "$uid:$uid" "$DATA_ROOT/$d"
+      echo "  [*] chown $uid: $DATA_ROOT/$d"
+    else
+      warn "请手动执行: sudo chown -R $uid:$uid $DATA_ROOT/$d"
+    fi
+  done
+
+  mkdir -p "$ENV_DIR"
+  date '+%Y-%m-%d %H:%M:%S' > "$INIT_LOCK_FILE"
+  ok "初始化完成。密钥位于: $SECRETS_DIR/"
+  echo
+  echo "接下来："
+  echo "  1. 检查并填写 $ENV_FILE"
+  echo "  2. 把应用配置放入 $DATA_ROOT 下对应的只读目录"
+  echo "  3. 准备镜像后执行: $0 start"
+}
+
+# ============================================
+# Compose 通用子命令（生产与灰度共用，调用前先设置 COMPOSE）
+# ============================================
+compose_dispatch() {
+  local cmd="$1"; shift || true
+  case "$cmd" in
+    start|up)  "${COMPOSE[@]}" up -d "$@";;
+    stop)      "${COMPOSE[@]}" stop "$@";;
+    down)
+      case " $* " in
+        *" -v "*|*" --volumes "*) confirm "down -v 会删除数据卷，确定继续？" || die "已取消";;
+      esac
+      "${COMPOSE[@]}" down "$@";;
+    restart)
+      if [ $# -gt 0 ]; then
+        "${COMPOSE[@]}" up -d --force-recreate "$@"
+      else
+        "${COMPOSE[@]}" up -d --force-recreate
+      fi;;
+    ps)        "${COMPOSE[@]}" ps "$@";;
+    logs)      if [ $# -eq 0 ]; then "${COMPOSE[@]}" logs -f --tail=200; else "${COMPOSE[@]}" logs "$@"; fi;;
+    exec)      "${COMPOSE[@]}" exec "$@";;
+    bash)      "${COMPOSE[@]}" exec "${1:-${SERVICES[0]}}" sh -c 'command -v bash >/dev/null && exec bash || exec sh';;
+    compose)   "${COMPOSE[@]}" "$@";;
+    *)         return 1;;
+  esac
+}
+
+# ============================================
+# 镜像构建
+# ============================================
+# 构建期变量：按服务追加 --build-arg（值来自 .env）。这些值会进入产物，改值须重新构建。
+build_args_for() {
+  case "$1" in
+    # web) [ -n "$PUBLIC_API_URL" ] && echo "--build-arg PUBLIC_API_URL=$PUBLIC_API_URL";;
+    *) ;;
+  esac
+}
+
+# image build <服务|all> [--as <tag>]    默认同时打 VERSION 与 latest
+image_build() {
+  local targets as_tag="latest"
+  targets=$(expand_targets "$1"); shift || true
+  while [ $# -gt 0 ]; do
+    case "$1" in --as) as_tag="$2"; shift 2;; *) die "未知参数: $1";; esac
+  done
+  local svc img
+  for svc in $targets; do
+    img=$(local_image "$svc")
+    info "构建 $img:${VERSION}（平台 ${TARGET_PLATFORM}）"
+    # shellcheck disable=SC2046
+    docker build --platform "$TARGET_PLATFORM" \
+      -t "$img:$VERSION" -t "$img:$as_tag" \
+      --build-arg VERSION="$VERSION" \
+      $(build_args_for "$svc") \
+      -f "$ENV_DIR/$svc/Dockerfile" \
+      "$PROJECT_ROOT"
+    ok "$img:${VERSION}（同时标记为 ${as_tag}）"
+  done
+}
+
+# >>> REGISTRY
+# ============================================
+# 镜像仓库（阿里云 ACR）
+# ============================================
+REGISTRY_PUBLIC="{{REGISTRY_PUBLIC}}"
+REGISTRY_VPC="{{REGISTRY_VPC}}"
+# 服务器在同地域 VPC 内时，在其 .env 里设置 REGISTRY_NET=vpc
+if [ "${REGISTRY_NET:-public}" = "vpc" ]; then
+  REGISTRY="$REGISTRY_VPC"
+else
+  REGISTRY="$REGISTRY_PUBLIC"
+fi
+
+remote_image() { echo "${REGISTRY}/${REGISTRY_NAMESPACE}/${PROJECT_SLUG}-$1"; }
+
+registry_login() {
+  [ -n "$REGISTRY_NAMESPACE" ] || die "未设置 REGISTRY_NAMESPACE（见 ${ENV_FILE}）"
+  [ -n "$REGISTRY_USERNAME" ] && [ -n "$REGISTRY_PASSWORD" ] \
+    || die "未设置 REGISTRY_USERNAME / REGISTRY_PASSWORD（见 ${ENV_FILE}）"
+  info "登录镜像仓库: $REGISTRY"
+  echo "$REGISTRY_PASSWORD" | docker login --username "$REGISTRY_USERNAME" --password-stdin "$REGISTRY"
+}
+
+# image push <服务|all>    推送 VERSION 与 latest
+image_push() {
+  registry_login
+  local svc img remote tag
+  for svc in $(expand_targets "$1"); do
+    img=$(local_image "$svc"); remote=$(remote_image "$svc")
+    for tag in "$VERSION" latest; do
+      docker tag "$img:$VERSION" "$remote:$tag"
+      docker push "$remote:$tag"
+    done
+    ok "已推送 $remote:$VERSION 与 latest"
+  done
+}
+
+# image pull <服务|all> [--as <latest|gray>] [--version <tag>]
+# 拉取后改打不带仓库域名的本地 tag，并移除带域名的 tag 引用（镜像本体因本地 tag 仍被引用，不会被回收）
+image_pull() {
+  local targets as_tag="latest" version="latest"
+  targets=$(expand_targets "$1"); shift || true
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --as) as_tag="$2"; shift 2;;
+      --version) version="$2"; shift 2;;
+      *) die "未知参数: $1";;
+    esac
+  done
+  registry_login
+  local svc img remote
+  for svc in $targets; do
+    img=$(local_image "$svc"); remote=$(remote_image "$svc")
+    info "拉取 $remote:$version → 本地 $img:$as_tag"
+    docker pull "$remote:$version"
+    docker tag "$remote:$version" "$img:$as_tag"
+    docker rmi "$remote:$version" >/dev/null 2>&1 || true
+    ok "$img:$as_tag"
+  done
+  echo "镜像已就绪，重启对应容器后生效。"
+}
+# <<< REGISTRY
+
+# >>> GRAY
+# ============================================
+# 灰度环境
+# ============================================
+gray_compose() { compose_args "$PROJECT_ROOT/{{DEPLOY_DIR}}/gray/docker-compose.gray.yml" "$PREFIX-gray"; }
+
+# image promote <服务|all>    本地把 gray 标记为 latest（之后需重启生产容器）
+image_promote() {
+  local svc img
+  for svc in $(expand_targets "$1"); do
+    img=$(local_image "$svc")
+    docker image inspect "$img:gray" >/dev/null 2>&1 || die "本地不存在 $img:gray"
+    docker tag "$img:gray" "$img:latest"
+    ok "$img: gray → latest"
+  done
+  echo "晋升完成。执行 '$0 restart' 让生产容器换用新镜像。"
+}
+# <<< GRAY
+
+# >>> DB
+# ============================================
+# 数据库 / 中间件（独立 compose，常驻运行，不随应用启停）
+# ============================================
+db_compose() { compose_args "$ENV_DIR/docker-compose.db.yml" "$PREFIX-$ENV_NAME-db"; }
+
+check_secrets() {
+  local name missing=0
+  for name in "${SECRET_NAMES[@]}"; do
+    [ -f "$SECRETS_DIR/${name}.txt" ] || { warn "缺少密钥文件: $SECRETS_DIR/${name}.txt"; missing=1; }
+  done
+  [ $missing -eq 0 ] || die "请先执行 '$0 init' 生成密钥文件"
+}
+
+db_dispatch() {
+  local cmd="$1"; shift || true
+  db_compose
+  case "$cmd" in
+    start|up) check_secrets; "${COMPOSE[@]}" up -d "$@";;
+    stop)
+      confirm "停止数据库会让 $ENV_NAME 应用不可用，确定继续？" || die "已取消"
+      "${COMPOSE[@]}" stop "$@";;
+    ps|logs|exec|restart) compose_dispatch "$cmd" "$@";;
+    migrate|status)
+      # 按项目使用的迁移工具填充。两种执行位置：
+      #   宿主机上运行迁移工具（连接串从 .env 读取，经 127.0.0.1 的映射端口访问）
+      #   在应用容器内运行（app_compose; "${COMPOSE[@]}" exec <服务> <迁移命令>），宿主机无需安装工具链
+      die "尚未配置迁移命令: db $cmd";;
+    *) die "未知数据库命令: $cmd";;
+  esac
+}
+# <<< DB
+
+# ============================================
+# 帮助
+# ============================================
+show_help() {
+  cat <<EOF
+$PROJECT_SLUG — $ENV_NAME 环境管理
+
+用法: $0 <命令> [参数]
+
+初始化:
+  init                          创建目录、生成密钥、调整属主（只能执行一次）
+
+容器:
+  start|up [服务...]            启动
+  stop [服务...]                停止（保留容器）
+  down                          停止并移除容器
+  restart [服务...]             用当前镜像重建并启动
+  ps                            状态
+  logs [参数...]                日志（默认 -f --tail=200）
+  exec <服务> <命令...>         在容器内执行命令
+  bash [服务]                   进入容器 shell（默认 ${SERVICES[0]}）
+  compose <参数...>             透传给 docker compose
+
+镜像:
+  image build <服务|all> [--as <tag>]     构建（VERSION=${VERSION}）
+EOF
+  declare -F image_push >/dev/null && cat <<EOF
+  image login                             登录镜像仓库
+  image push <服务|all>                   推送 VERSION 与 latest
+  image pull <服务|all> [--as <tag>] [--version <tag>]
+                                          拉取并标记为本地 tag（回滚：--version 指定旧版本）
+EOF
+  declare -F image_promote >/dev/null && cat <<EOF
+  image promote <服务|all>                gray → latest
+
+灰度:
+  gray <start|stop|down|restart|ps|logs|exec|bash> [参数...]
+EOF
+  declare -F db_dispatch >/dev/null && cat <<EOF
+
+数据库:
+  db <start|stop|restart|ps|logs|exec|migrate|status> [参数...]
+EOF
+  cat <<EOF
+
+环境变量:
+  DEPLOY_ENV_FILE               覆盖 .env 路径（当前: ${ENV_FILE}）
+  VERSION                       覆盖镜像版本号（默认取 git describe）
+EOF
+}
+
+# ============================================
+# 命令分发
+# ============================================
+cmd="${1:-help}"
+shift || true
+
+case "$cmd" in
+  help|-h|--help) show_help; exit 0;;
+esac
+
+preflight
+
+case "$cmd" in
+  init) init_env;;
+  version) echo "$VERSION";;
+  image)
+    sub="${1:-}"; shift || true
+    case "$sub" in
+      build) image_build "$@";;
+# >>> REGISTRY
+      login) registry_login;;
+      push)  image_push "$@";;
+      pull)  image_pull "$@";;
+# <<< REGISTRY
+# >>> GRAY
+      promote) image_promote "$@";;
+# <<< GRAY
+      *) die "未知镜像命令: ${sub:-（空）}，见 '$0 help'";;
+    esac;;
+# >>> GRAY
+  gray)
+    sub="${1:-}"; shift || true
+    gray_compose
+    compose_dispatch "$sub" "$@" || die "未知灰度命令: ${sub:-（空）}";;
+# <<< GRAY
+# >>> DB
+  db)
+    db_dispatch "$@";;
+# <<< DB
+  *)
+    app_compose
+    compose_dispatch "$cmd" "$@" || { echo "未知命令: $cmd" >&2; show_help; exit 1; };;
+esac

@@ -1,0 +1,23 @@
+# ===== 追加到 .gitignore =====
+# 环境变量：只入库 .env.example
+.env
+.env.*
+!.env.example
+
+# 部署：本地数据、密钥、初始化锁
+{{DEPLOY_DIR}}/dev/local/*
+!{{DEPLOY_DIR}}/dev/local/.gitkeep
+{{DEPLOY_DIR}}/*/secrets/*
+!{{DEPLOY_DIR}}/*/secrets/.gitkeep
+!{{DEPLOY_DIR}}/*/secrets/*.example.txt
+!{{DEPLOY_DIR}}/*/secrets/*.env.example
+{{DEPLOY_DIR}}/*/data/
+{{DEPLOY_DIR}}/*/.initialized
+
+# ===== 追加到 .dockerignore =====
+.git
+.env
+.env.*
+{{DEPLOY_DIR}}/*/local
+{{DEPLOY_DIR}}/*/data
+{{DEPLOY_DIR}}/*/secrets

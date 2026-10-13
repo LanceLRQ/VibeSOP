@@ -1,0 +1,15 @@
+# Local notes
+
+This file is git-ignored. It holds what belongs to this machine or this person. Project rules live in `AGENTS.md`.
+<!-- >>> STAGE -->
+
+## Current stage and constraints
+
+{{STAGE_AND_CONSTRAINTS}}
+<!-- <<< STAGE -->
+<!-- >>> LOCAL_PATHS -->
+
+## Local paths
+
+{{LOCAL_PATHS}}
+<!-- <<< LOCAL_PATHS -->

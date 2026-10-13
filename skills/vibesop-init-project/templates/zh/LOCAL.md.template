@@ -1,0 +1,15 @@
+# 本机备注
+
+本文件已被 git 忽略，只放属于这台机器或这个人的内容。项目规则写在 `AGENTS.md`。
+<!-- >>> STAGE -->
+
+## 当前阶段与约束
+
+{{STAGE_AND_CONSTRAINTS}}
+<!-- <<< STAGE -->
+<!-- >>> LOCAL_PATHS -->
+
+## 本机路径
+
+{{LOCAL_PATHS}}
+<!-- <<< LOCAL_PATHS -->

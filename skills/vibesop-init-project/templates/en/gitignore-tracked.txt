@@ -1,0 +1,5 @@
+# >>> vibesop (managed block: project governance)
+# Personal AI-assistant files
+CLAUDE.local.md
+.claude/
+# <<< vibesop

@@ -1,0 +1,7 @@
+# >>> vibesop (managed block: project governance)
+# Process docs stay on this machine
+docs/_internal/
+# Personal AI-assistant files
+CLAUDE.local.md
+.claude/
+# <<< vibesop

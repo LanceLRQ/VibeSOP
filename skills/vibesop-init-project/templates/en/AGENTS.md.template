@@ -1,0 +1,51 @@
+# {{PROJECT_NAME}}
+
+{{PROJECT_ONE_LINER}}
+<!-- >>> MAP -->
+
+## Map
+
+| Path | Responsibility |
+|---|---|
+{{MAP_ROWS}}
+<!-- <<< MAP -->
+<!-- >>> CONVENTIONS -->
+
+## Conventions
+
+{{CONVENTIONS}}
+<!-- <<< CONVENTIONS -->
+<!-- >>> TESTS -->
+
+## Tests
+
+{{TESTS}}
+<!-- <<< TESTS -->
+
+## Done
+
+<!-- >>> DONE_GATE -->
+A change is done when `{{DONE_COMMAND}}` passes.
+<!-- <<< DONE_GATE -->
+<!-- >>> DONE_UNDEFINED -->
+No check command is defined yet. Write it here once the project has one.
+<!-- <<< DONE_UNDEFINED -->
+
+## Docs
+
+<!-- >>> LAYOUT_ISOLATED -->
+- Public docs live in `docs/`.
+- Process docs (research, discussion, specs, plans, audit, reference, ui) live in `docs/_internal/<category>/`. That directory is git-ignored: its files and their content stay out of commits, pull requests and public files.
+- The index is `docs/_internal/README.md`. Read it before creating or looking for a process doc, and register new files in it.
+- Specs and plans produced by workflow skills go to `docs/_internal/specs/` and `docs/_internal/plans/`, whatever path the skill uses by default.
+- Local notes (current stage, hard constraints, paths on this machine) are in `docs/_internal/LOCAL.md`. When that file exists, read it before starting work.
+<!-- <<< LAYOUT_ISOLATED -->
+<!-- >>> LAYOUT_TRACKED -->
+- Process docs (research, discussion, specs, plans, audit, reference, ui) live in `{{DOCS_ROOT}}/<category>/` and are committed with the code.
+- The index is `{{DOCS_ROOT}}/README.md`. Read it before creating or looking for a process doc, and register new files in it.
+- Specs and plans produced by workflow skills go to `{{DOCS_ROOT}}/specs/` and `{{DOCS_ROOT}}/plans/`, whatever path the skill uses by default.
+<!-- <<< LAYOUT_TRACKED -->
+
+## Language
+
+{{WORKING_LANGUAGE}}

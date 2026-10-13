@@ -1,0 +1,768 @@
+#!/usr/bin/env bash
+# {{APP_NAME}} 部署管理脚本：安装、启停、状态、日志、升级、自检、卸载（单文件，bash 3.2+，仅 Linux 宿主机）
+#
+# 安装：curl -fsSL {{RAW_BASE}}/{{DEFAULT_BRANCH}}/{{SCRIPT_REPO_PATH}} | bash
+# 管理：{{APP_NAME}} [命令] [--dir 目录]
+#
+# {{APP_ENV_PREFIX}}_SOURCE_ONLY=1 时只定义函数、不执行 main（供测试 source）。
+
+# 以 sh 调用时改用 bash 重新执行。这几行必须保持 POSIX sh 兼容
+if [ -z "${BASH_VERSION:-}" ]; then
+  if [ -f "$0" ] && command -v bash >/dev/null 2>&1; then exec bash "$0" "$@"; fi
+  echo "{{APP_NAME}}.sh requires bash / 需要用 bash 运行" >&2
+  exit 1
+fi
+
+# ===== 1. 常量与可覆盖路径 =====
+
+# 发版时与镜像版本号一起更新；CI 会校验它与版本真源一致
+SCRIPT_VERSION="{{SCRIPT_VERSION}}"
+APP_NAME="{{APP_NAME}}"
+HUB_IMAGE="{{HUB_IMAGE}}"
+DEFAULT_HOME="/opt/{{APP_NAME}}"
+DEFAULT_PORT={{DEFAULT_PORT}}
+# 启动后轮询这个路径直到返回 200，视为就绪
+HEALTH_PATH="{{HEALTH_PATH}}"
+STATE_NAME=".{{APP_NAME}}-state"
+SCRIPT_NAME="{{APP_NAME}}.sh"
+# .env 里的键名
+K_IMAGE="{{APP_ENV_PREFIX}}_IMAGE"
+K_VERSION="{{APP_ENV_PREFIX}}_VERSION"
+
+# 以下均可被环境变量覆盖：测试注入桩，或特殊环境（镜像加速、非常规安装位置）
+BIN_DIR="${{{APP_ENV_PREFIX}}_BIN_DIR:-/usr/local/bin}"
+DOCKER_BIN="${{{APP_ENV_PREFIX}}_DOCKER_BIN:-docker}"
+SUDO_BIN="${{{APP_ENV_PREFIX}}_SUDO:-sudo}"
+DOCKER_SOCK="${{{APP_ENV_PREFIX}}_DOCKER_SOCK:-/var/run/docker.sock}"
+TTY_DEV="${{{APP_ENV_PREFIX}}_TTY:-/dev/tty}"
+RAW_BASE="${{{APP_ENV_PREFIX}}_RAW_BASE:-{{RAW_BASE}}}"
+HUB_TAGS_URL="${{{APP_ENV_PREFIX}}_HUB_TAGS_URL:-https://hub.docker.com/v2/repositories/{{HUB_IMAGE}}/tags?page_size=100}"
+READY_TIMEOUT="${{{APP_ENV_PREFIX}}_READY_TIMEOUT:-60}"
+
+# 交互输入只在这里打开一次，之后所有读都走 fd 9：curl | bash 时 stdin 是管道，不能用来读用户输入。
+# 填 "-" 表示沿用继承的 stdin（测试用）。打不开就让 fd 空着，由 tty_ok 探测并提示。
+if [ "$TTY_DEV" = "-" ]; then
+  exec 9<&0
+else
+  { exec 9<"$TTY_DEV"; } 2>/dev/null || true
+fi
+
+SELF=""
+case "${BASH_SOURCE[0]:-}" in
+  "" | bash | -bash | /dev/stdin | /dev/fd/* | /proc/*) ;;
+  *) [ -f "${BASH_SOURCE[0]}" ] && SELF="${BASH_SOURCE[0]}" ;;
+esac
+
+APP_HOME=""
+CMD=""
+OPT_DIR=""
+OPT_TO=""
+OPT_FOLLOW=0
+
+# ===== 2. 基础工具 =====
+
+info() { printf '[*] %s\n' "$*"; }
+ok()   { printf '[OK] %s\n' "$*"; }
+warn() { printf '[!] %s\n' "$*" >&2; }
+err()  { printf '[X] %s\n' "$*" >&2; }
+
+sh_quote() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
+
+# 转绝对路径：展开 ~、拼 PWD、去掉末尾斜杠（不解析 .. 与符号链接）
+abs_path() {
+  local p="$1"
+  # shellcheck disable=SC2088  # 这里是在匹配字面的 ~，展开由分支内手工完成
+  case "$p" in
+    "~") p="$HOME" ;;
+    "~/"*) p="$HOME/${p#"~/"}" ;;
+    /*) ;;
+    *) p="$PWD/$p" ;;
+  esac
+  while [ "${p%/}" != "$p" ] && [ "$p" != "/" ]; do p="${p%/}"; done
+  printf '%s\n' "$p"
+}
+
+# 禁止用作安装/删除目标的路径：根、家目录、含 .. 的路径，以及系统与挂载顶层目录本身
+path_forbidden() {
+  case "$1" in
+    "" | / | "$HOME" | ..) return 0 ;;
+    */../* | */..) return 0 ;;
+    /opt | /usr | /usr/* | /home | /root | /etc | /var | /bin | /sbin | /lib | /lib64 | /boot | \
+      /srv | /mnt | /media | /data | /tmp | /proc | /sys | /dev | /run)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+stat_owner() { stat -c '%u:%g' "$1" 2>/dev/null || stat -f '%u:%g' "$1" 2>/dev/null; }
+
+gen_password() { LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom 2>/dev/null | head -c 20; }
+
+is_root() { [ "$(id -u)" = 0 ]; }
+
+as_root() {
+  if is_root; then "$@"; return; fi
+  if command -v "$SUDO_BIN" >/dev/null 2>&1; then "$SUDO_BIN" "$@"; return; fi
+  err "需要 root 权限，且未找到 sudo"
+  return 1
+}
+
+# ----- .env / 状态文件读写 -----
+
+env_quote() {
+  case "$1" in
+    *[!A-Za-z0-9_./:@,+%=-]*) printf "'%s'" "$1" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
+# 写入用单引号包裹，值里的单引号与换行无法安全表达，一律拒绝
+env_valid_value() {
+  case "$1" in *"'"* | *$'\n'*) return 1 ;; esac
+  return 0
+}
+
+# env_get FILE KEY：取最后一次出现的值并去掉包裹引号；缺键返回 1
+env_get() {
+  local line v
+  [ -f "$1" ] || return 1
+  line=$(grep "^$2=" "$1" | tail -n 1)
+  [ -n "$line" ] || return 1
+  v="${line#*=}"
+  case "$v" in
+    \'*\') v="${v#\'}"; v="${v%\'}" ;;
+    \"*\") v="${v#\"}"; v="${v%\"}" ;;
+    *) v="${v%% #*}" ;;
+  esac
+  printf '%s\n' "$v"
+}
+
+# env_set FILE KEY VALUE：原地替换首个同名行并删去其余同名行；缺失则追加。
+# 不重排、不动注释与其他变量，所以用户手改 .env 是安全的
+env_set() {
+  local f="$1" k="$2" v="$3" line tmp old_umask
+  env_valid_value "$v" || return 2
+  line="$k=$(env_quote "$v")"
+  tmp="$f.tmp.$$"
+  # 临时文件可能含密码：用 077 的 umask 创建，避免先落一份可被他人读取的明文
+  old_umask=$(umask)
+  umask 077
+  if [ -f "$f" ] && grep -q "^$k=" "$f"; then
+    ENV_LINE="$line" awk -v k="$k=" '
+      index($0, k) == 1 { if (!done) { print ENVIRON["ENV_LINE"]; done = 1 } next }
+      { print }' "$f" >"$tmp" || { rm -f "$tmp"; umask "$old_umask"; return 1; }
+  else
+    {
+      if [ -f "$f" ]; then
+        cat "$f"
+        [ -z "$(tail -c 1 "$f")" ] || printf '\n'
+      fi
+      printf '%s\n' "$line"
+    } >"$tmp" || { rm -f "$tmp"; umask "$old_umask"; return 1; }
+  fi
+  umask "$old_umask"
+  # 已有文件用 cat 写回以保留其权限与属主
+  if [ -f "$f" ]; then cat "$tmp" >"$f" && rm -f "$tmp"; else mv "$tmp" "$f"; fi
+}
+
+state_get() { env_get "$APP_HOME/$STATE_NAME" "$1"; }
+state_set() { env_set "$APP_HOME/$STATE_NAME" "$1" "$2"; }
+
+# ----- 交互 -----
+
+tty_ok() { { true <&9; } 2>/dev/null; }
+
+# 输入结束（EOF：管道断开、终端被关）一律视为取消，绝不回落到默认值——
+# 否则 curl | bash 中途断流时，脚本会无人确认地按默认值装下去。
+
+# ask 提示 默认值：回车采用默认值；输入结束返回 1。调用处必须写成 v=$(ask …) || return 1
+ask() {
+  local reply
+  printf '%s [%s]: ' "$1" "$2" >&2
+  if ! IFS= read -r reply <&9; then
+    printf '\n' >&2
+    err "输入已结束，操作取消"
+    return 1
+  fi
+  printf '%s\n' "${reply:-$2}"
+}
+
+# confirm 提示 默认(y|n)：输入结束时无论默认值是什么都返回 1
+confirm() {
+  local reply hint="y/N"
+  [ "${2:-n}" = y ] && hint="Y/n"
+  printf '%s [%s]: ' "$1" "$hint" >&2
+  if ! IFS= read -r reply <&9; then
+    printf '\n' >&2
+    return 1
+  fi
+  case "${reply:-${2:-n}}" in y | Y | yes) return 0 ;; *) return 1 ;; esac
+}
+
+# ----- 环境探测 -----
+
+platform_ok() {
+  [ "${{{APP_ENV_PREFIX}}_SKIP_PLATFORM_CHECK:-}" = 1 ] || [ "$(uname -s)" = Linux ]
+}
+
+DK_SUDO=0
+# 所有 docker 调用都经它：探测出需要 sudo 时自动加上
+dk() {
+  if [ "$DK_SUDO" = 1 ]; then "$SUDO_BIN" "$DOCKER_BIN" "$@"; else "$DOCKER_BIN" "$@"; fi
+}
+
+# 返回 0 表示可用；否则把原因打到 stderr
+require_docker() {
+  DK_SUDO=0
+  if ! command -v "$DOCKER_BIN" >/dev/null 2>&1; then
+    err "未找到 docker，请先安装 Docker Engine: https://docs.docker.com/engine/install/"
+    return 1
+  fi
+  if ! "$DOCKER_BIN" info >/dev/null 2>&1; then
+    # 连不上有两种可能：没权限访问 sock（非 root 且不在 docker 组），或 daemon 没起
+    if [ -S "$DOCKER_SOCK" ] && ! is_root && [ ! -w "$DOCKER_SOCK" ] &&
+      command -v "$SUDO_BIN" >/dev/null 2>&1; then
+      info "当前用户无权访问 Docker，将通过 sudo 执行 docker 命令"
+      DK_SUDO=1
+      dk info >/dev/null 2>&1 || { err "Docker daemon 无法连接"; return 1; }
+    else
+      err "Docker daemon 无法连接（未启动，或当前用户无权限）"
+      return 1
+    fi
+  fi
+  if ! dk compose version >/dev/null 2>&1; then
+    err "缺少 docker compose v2 插件: https://docs.docker.com/compose/install/linux/"
+    return 1
+  fi
+}
+
+port_in_use() {
+  if command -v ss >/dev/null 2>&1; then
+    ss -ltnH 2>/dev/null | awk '{print $4}' | grep -Eq "[:.]$1\$"
+  elif command -v netstat >/dev/null 2>&1; then
+    netstat -ltn 2>/dev/null | awk '{print $4}' | grep -Eq "[:.]$1\$"
+  else
+    return 1
+  fi
+}
+
+valid_port() {
+  case "$1" in "" | *[!0-9]*) return 1 ;; esac
+  [ "$1" -ge 1 ] && [ "$1" -le 65535 ]
+}
+
+detect_timezone() {
+  local tz=""
+  [ -r /etc/timezone ] && tz=$(head -n 1 /etc/timezone 2>/dev/null)
+  if [ -z "$tz" ] && command -v timedatectl >/dev/null 2>&1; then
+    tz=$(timedatectl show -p Timezone --value 2>/dev/null)
+  fi
+  if [ -z "$tz" ] && [ -L /etc/localtime ]; then
+    tz=$(readlink /etc/localtime 2>/dev/null | sed 's#.*/zoneinfo/##')
+  fi
+  printf '%s\n' "${tz:-UTC}"
+}
+
+download() {
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL --connect-timeout 10 --max-time "${2:-30}" "$1" 2>/dev/null
+  elif command -v wget >/dev/null 2>&1; then
+    wget -q -T "${2:-30}" -O - "$1" 2>/dev/null
+  else
+    return 127
+  fi
+}
+
+# ===== 3. 内嵌模板 =====
+
+# 必须与仓库里的发布用 compose 文件逐字节一致（由测试守护）。
+# heredoc 定界符带引号：内容里的 ${VAR} 原样写出，由 compose 在运行时插值。
+tpl_compose() {
+  cat <<'EOF_COMPOSE'
+{{COMPOSE_BODY}}
+EOF_COMPOSE
+}
+
+# ===== 4. 安装 =====
+
+dir_state() {
+  if [ -f "$1/$STATE_NAME" ]; then
+    printf installed
+  elif [ -f "$1/docker-compose.yml" ] || [ -f "$1/.env" ]; then
+    printf foreign
+  else
+    printf empty
+  fi
+}
+
+# 已有安装的定位：--dir > 环境变量（启动器导出）> 脚本自身所在目录
+home_candidate() {
+  if [ -n "$OPT_DIR" ]; then
+    abs_path "$OPT_DIR"
+  elif [ -n "${{{APP_ENV_PREFIX}}_HOME:-}" ]; then
+    abs_path "${{{APP_ENV_PREFIX}}_HOME}"
+  elif [ -n "$SELF" ]; then
+    abs_path "$(dirname "$SELF")"
+  fi
+}
+
+wizard() {
+  local v
+  echo
+  echo "=== ${APP_NAME} 安装向导（每项回车采用默认值；确认之前不会写入任何文件）==="
+
+  while :; do
+    v=$(ask "安装目录" "${W_HOME:-$DEFAULT_HOME}") || return 1
+    W_HOME=$(abs_path "$v")
+    case "$W_HOME" in *" "* | *:*) warn "路径不能包含空格或冒号"; W_HOME=""; continue ;; esac
+    if path_forbidden "$W_HOME"; then
+      warn "不能安装到 ${W_HOME}，请指定它下面的一个专用子目录"
+      W_HOME=""
+      continue
+    fi
+    case "$(dir_state "$W_HOME")" in
+      installed) err "${W_HOME} 已经安装过，请直接运行: ${W_HOME}/${SCRIPT_NAME}"; return 1 ;;
+      foreign)
+        warn "${W_HOME} 里已有 docker-compose.yml 或 .env（不是本脚本创建的），继续会覆盖它们"
+        confirm "仍然安装到这里？" n || { W_HOME=""; continue; } ;;
+    esac
+    break
+  done
+
+  while :; do
+    W_PORT=$(ask "对外端口" "${W_PORT:-$DEFAULT_PORT}") || return 1
+    valid_port "$W_PORT" || { warn "端口须在 1-65535 之间"; W_PORT=""; continue; }
+    if port_in_use "$W_PORT"; then warn "端口 ${W_PORT} 已被占用"; W_PORT=""; continue; fi
+    break
+  done
+
+  echo "监听地址: 0.0.0.0 = 所有网卡可访问；127.0.0.1 = 仅本机（放在反向代理之后时用这个）"
+  W_BIND=$(ask "监听地址" "${W_BIND:-0.0.0.0}") || return 1
+
+  echo "运行身份: 容器内进程使用的 uid:gid，必须对数据目录可写"
+  v=$(ask "运行身份 (uid:gid)" "${W_PUID:-1000}:${W_PGID:-1000}") || return 1
+  W_PUID="${v%%:*}"
+  W_PGID="${v##*:}"
+
+  W_TZ=$(ask "时区" "${W_TZ:-$(detect_timezone)}") || return 1
+
+  # 所有将写入 .env 的值在这里校验，不要等到落盘时才失败（那时已经写了一半文件）
+  for v in "$W_BIND" "$W_PUID" "$W_PGID" "$W_TZ"; do
+    env_valid_value "$v" || { err "输入的值不能包含单引号或换行"; return 1; }
+  done
+
+# >>> ADMIN_PASSWORD
+  W_PASSWORD_GENERATED=0
+  while :; do
+    v=$(ask "管理员密码（留空则随机生成）" "") || return 1
+    if [ -z "$v" ]; then
+      W_PASSWORD=$(gen_password)
+      W_PASSWORD_GENERATED=1
+      break
+    fi
+    if [ "${#v}" -lt 8 ] || ! env_valid_value "$v"; then
+      warn "密码至少 8 位，且不能包含单引号"
+      continue
+    fi
+    W_PASSWORD="$v"
+    break
+  done
+# <<< ADMIN_PASSWORD
+
+  echo
+  echo "--- 请确认 ---"
+  echo "  安装目录: ${W_HOME}"
+  echo "  镜像:     ${HUB_IMAGE}:${SCRIPT_VERSION}"
+  echo "  访问:     ${W_BIND}:${W_PORT}"
+  echo "  运行身份: ${W_PUID}:${W_PGID}"
+  echo "  时区:     ${W_TZ}"
+  # 密码等敏感项有意不在汇总页显示
+  confirm "按以上配置安装？" y
+}
+
+launcher_content() {
+  printf '#!/bin/sh\nexport {{APP_ENV_PREFIX}}_HOME=%s\nexec %s "$@"\n' \
+    "$(sh_quote "$1")" "$(sh_quote "$1/$SCRIPT_NAME")"
+}
+
+# 命令入口是两行启动器而非符号链接：安装目录写死在里面，任意目录执行都作用于这份部署
+install_launcher() {
+  local home="$1" dst="$BIN_DIR/$APP_NAME" tmp="$1/.launcher.tmp"
+  if [ -f "$dst" ] && ! grep -qF "$(sh_quote "$home/$SCRIPT_NAME")" "$dst"; then
+    confirm "${dst} 已存在且指向别处，覆盖？" n || { warn "已跳过命令入口，之后请直接运行 ${home}/${SCRIPT_NAME}"; return 0; }
+  fi
+  if ! { launcher_content "$home" >"$tmp" && chmod 755 "$tmp"; }; then
+    rm -f "$tmp"
+    return 1
+  fi
+  if [ -d "$BIN_DIR" ] && [ -w "$BIN_DIR" ]; then
+    mv "$tmp" "$dst" || { rm -f "$tmp"; return 1; }
+  else
+    # 经 sudo 落地用 install 而不是 mv：这样文件属主才是 root
+    if confirm "写入 ${dst} 需要 root 权限，使用 sudo？" y &&
+      as_root mkdir -p "$BIN_DIR" && as_root install -m 755 "$tmp" "$dst"; then
+      rm -f "$tmp"
+    else
+      rm -f "$tmp"
+      warn "已跳过命令入口，之后请直接运行 ${home}/${SCRIPT_NAME}"
+      return 0
+    fi
+  fi
+  ok "命令入口已安装: ${dst}"
+}
+
+# 把脚本本体放进安装目录：以文件运行时复制自身；curl | bash 时读不到自身，
+# 按自身版本的 tag 重新下载（tag 未发布时回退默认分支），过了 bash -n 才落盘
+place_self() {
+  local dst="$1/$SCRIPT_NAME" tmp="$1/.$SCRIPT_NAME.tmp"
+  if [ -n "$SELF" ]; then
+    [ "$(abs_path "$SELF")" = "$dst" ] && return 0
+    cp "$SELF" "$tmp" || return 1
+  elif ! download "$RAW_BASE/v$SCRIPT_VERSION/{{SCRIPT_REPO_PATH}}" >"$tmp" &&
+    ! download "$RAW_BASE/{{DEFAULT_BRANCH}}/{{SCRIPT_REPO_PATH}}" >"$tmp"; then
+    rm -f "$tmp"
+    err "下载脚本本体失败；可先下载到本地再执行: bash ${SCRIPT_NAME}"
+    return 1
+  fi
+  if ! bash -n "$tmp" 2>/dev/null; then
+    rm -f "$tmp"
+    err "下载到的脚本未通过语法检查，已放弃"
+    return 1
+  fi
+  chmod 755 "$tmp" && mv "$tmp" "$dst"
+}
+
+apply_install() {
+  local home="$W_HOME" env="$W_HOME/.env"
+  if ! mkdir -p "$home" 2>/dev/null; then
+    as_root mkdir -p "$home" && as_root chown "$(id -u):$(id -g)" "$home" || return 1
+  fi
+  [ -w "$home" ] || { err "${home} 不可写，请用 sudo 运行或换一个目录"; return 1; }
+  APP_HOME="$home"
+
+  mkdir -p "$home/data" || return 1
+  if [ "$(stat_owner "$home/data")" != "$W_PUID:$W_PGID" ]; then
+    chown "$W_PUID:$W_PGID" "$home/data" 2>/dev/null || as_root chown "$W_PUID:$W_PGID" "$home/data" ||
+      warn "未能调整 ${home}/data 的属主，请手动执行: chown -R ${W_PUID}:${W_PGID} ${home}/data"
+  fi
+
+  tpl_compose >"$home/docker-compose.yml" || return 1
+
+  ( umask 077; : >>"$env" ) || return 1
+  chmod 600 "$env"
+  env_set "$env" "$K_IMAGE" "$HUB_IMAGE" &&
+    env_set "$env" "$K_VERSION" "$SCRIPT_VERSION" &&
+    env_set "$env" APP_BIND "$W_BIND" &&
+    env_set "$env" APP_PORT "$W_PORT" &&
+    env_set "$env" PUID "$W_PUID" &&
+    env_set "$env" PGID "$W_PGID" &&
+    env_set "$env" TZ "$W_TZ" || return 1
+# >>> ADMIN_PASSWORD
+  env_set "$env" ADMIN_PASSWORD "$W_PASSWORD" || return 1
+# <<< ADMIN_PASSWORD
+
+  place_self "$home" || return 1
+  install_launcher "$home"
+
+  # 状态文件最后写：半途失败的安装重新运行时不会被误判为「已安装」
+  state_set installed_at "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" || return 1
+}
+
+cmd_install() {
+  platform_ok || { err "仅支持 Linux 宿主机"; return 1; }
+  if ! tty_ok; then
+    err "当前没有可用的交互终端。请先下载再执行："
+    err "  curl -fsSLO ${RAW_BASE}/{{DEFAULT_BRANCH}}/{{SCRIPT_REPO_PATH}} && bash ${SCRIPT_NAME}"
+    return 1
+  fi
+  require_docker || return 1
+  W_HOME="${1:-}"
+  wizard || { warn "已取消，未写入任何文件"; return 1; }
+  apply_install || { err "安装失败"; return 1; }
+  ok "已安装到 ${APP_HOME}"
+# >>> ADMIN_PASSWORD
+  if [ "$W_PASSWORD_GENERATED" = 1 ]; then
+    echo "管理员密码（仅显示这一次，也可在 ${APP_HOME}/.env 里查看）: ${W_PASSWORD}"
+  fi
+# <<< ADMIN_PASSWORD
+  echo "配置文件: ${APP_HOME}/.env    常用命令: ${APP_NAME} start | stop | status | logs | upgrade | doctor"
+  if confirm "现在拉取镜像并启动？" y; then cmd_start; fi
+}
+
+# ===== 5. 运维命令 =====
+
+compose() { ( cd "$APP_HOME" && dk compose "$@" ); }
+
+app_running() { [ -n "$(compose ps -q --status running 2>/dev/null)" ]; }
+
+app_env() { env_get "$APP_HOME/.env" "$1"; }
+
+preflight_start() {
+  local port puid pgid
+  [ -f "$APP_HOME/.env" ] || { err "缺少 ${APP_HOME}/.env，请重新安装"; return 1; }
+  port=$(app_env APP_PORT || echo "$DEFAULT_PORT")
+  # 应用自己在运行时占的是自己的端口，不算冲突
+  if ! app_running && port_in_use "$port"; then
+    err "端口 ${port} 已被其他进程占用，请修改 ${APP_HOME}/.env 的 APP_PORT"
+    return 1
+  fi
+  puid=$(app_env PUID || echo 1000)
+  pgid=$(app_env PGID || echo 1000)
+  if [ "$(stat_owner "$APP_HOME/data")" != "$puid:$pgid" ]; then
+    warn "${APP_HOME}/data 的属主与运行身份 ${puid}:${pgid} 不一致"
+    if confirm "现在修正？" y; then
+      chown -R "$puid:$pgid" "$APP_HOME/data" 2>/dev/null || as_root chown -R "$puid:$pgid" "$APP_HOME/data"
+    fi
+  fi
+}
+
+access_host() {
+  local bind
+  bind=$(app_env APP_BIND || echo 0.0.0.0)
+  [ "$bind" = "0.0.0.0" ] && bind=127.0.0.1
+  printf '%s\n' "$bind"
+}
+
+wait_ready() {
+  local url i=0 code
+  url="http://$(access_host):$(app_env APP_PORT || echo "$DEFAULT_PORT")$HEALTH_PATH"
+  command -v curl >/dev/null 2>&1 || return 0
+  while [ "$i" -lt "$READY_TIMEOUT" ]; do
+    code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "$url" 2>/dev/null)
+    [ "$code" = 200 ] && return 0
+    sleep 1
+    i=$((i + 1))
+  done
+  return 1
+}
+
+_up() {
+  preflight_start || return 1
+  compose up -d "$@" || return 1
+  if wait_ready; then
+    ok "已就绪: http://$(access_host):$(app_env APP_PORT || echo "$DEFAULT_PORT")"
+  else
+    warn "${READY_TIMEOUT} 秒内未就绪，请用 '${APP_NAME} logs' 查看日志"
+  fi
+}
+
+cmd_start() { _up; }
+
+# 修改 .env 里被插值进 compose 的值不会触发默认重建，所以重启一律强制重建容器
+cmd_restart() { _up --force-recreate; }
+
+cmd_stop() { compose stop; }
+
+cmd_status() {
+  echo "安装目录: ${APP_HOME}"
+  echo "镜像:     $(app_env "$K_IMAGE" || echo "$HUB_IMAGE"):$(app_env "$K_VERSION" || echo '?')"
+  echo "访问:     $(app_env APP_BIND || echo 0.0.0.0):$(app_env APP_PORT || echo "$DEFAULT_PORT")"
+  compose ps
+}
+
+cmd_logs() {
+  if [ "$OPT_FOLLOW" = 1 ]; then compose logs --tail 200 -f; else compose logs --tail 200; fi
+}
+
+# 从 Docker Hub 取最新的正式版本号（x.y.z，不含预发布）；失败则输出空
+fetch_latest_version() {
+  download "$HUB_TAGS_URL" 5 | grep -o '"name": *"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/' |
+    grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1
+}
+
+cmd_upgrade() {
+  local env="$APP_HOME/.env" cur target
+  cur=$(app_env "$K_VERSION" || echo "")
+  target="$OPT_TO"
+  if [ -z "$target" ]; then
+    info "查询最新版本…"
+    target=$(fetch_latest_version)
+    [ -n "$target" ] || { err "查询最新版本失败；网络受限时请用 --to <版本号> 指定"; return 1; }
+  fi
+  if [ "$target" = "$cur" ]; then ok "已是 ${cur}，无需升级"; return 0; fi
+  warn "数据通常只能向新版本迁移；降级到旧版本可能读不了现有数据"
+  confirm "从 ${cur:-未知} 切换到 ${target}？" y || return 0
+
+  env_set "$env" "$K_VERSION" "$target" || return 1
+  if ! compose pull; then
+    # 拉取失败：恢复版本号，运行中的容器不受影响
+    [ -n "$cur" ] && env_set "$env" "$K_VERSION" "$cur"
+    err "拉取镜像失败，已恢复为 ${cur}。网络受限时请为 Docker 配置 registry-mirrors 或代理"
+    return 1
+  fi
+  # 到这里镜像已经是新的；重建失败不回滚版本号，排查后执行 start 即可
+  cmd_restart
+}
+
+DOCTOR_FAILED=0
+doctor_line() {
+  case "$1" in
+    ok) printf '  ✔ %s\n' "$2" ;;
+    warn) printf '  ⚠ %s\n' "$2" ;;
+    *) printf '  ✘ %s\n' "$2"; DOCTOR_FAILED=$((DOCTOR_FAILED + 1)) ;;
+  esac
+}
+
+cmd_doctor() {
+  local port puid pgid key image
+  DOCTOR_FAILED=0
+  echo "=== ${APP_NAME} 环境自检 ==="
+  if platform_ok; then doctor_line ok "宿主机平台"; else doctor_line fail "仅支持 Linux 宿主机"; fi
+  if require_docker 2>/dev/null; then
+    doctor_line ok "Docker 与 compose 可用"
+  else
+    doctor_line fail "Docker 不可用（缺 docker、daemon 连不上或缺 compose v2）"
+    echo "发现 ${DOCTOR_FAILED} 项问题"
+    return 1
+  fi
+  for key in "$K_VERSION" APP_PORT PUID PGID; do
+    if [ -n "$(app_env "$key" || true)" ]; then doctor_line ok ".env: ${key}"; else doctor_line fail ".env 缺少 ${key}"; fi
+  done
+  image="$(app_env "$K_IMAGE" || echo "$HUB_IMAGE"):$(app_env "$K_VERSION" || echo latest)"
+  if dk image inspect "$image" >/dev/null 2>&1; then
+    doctor_line ok "镜像已在本地: ${image}"
+  else
+    doctor_line warn "镜像尚未拉取（首次启动会自动拉取）: ${image}"
+  fi
+  port=$(app_env APP_PORT || echo "$DEFAULT_PORT")
+  if app_running; then
+    doctor_line ok "正在运行，端口 ${port}"
+  elif port_in_use "$port"; then
+    doctor_line fail "未运行，但端口 ${port} 被其他进程占用"
+  else
+    doctor_line ok "端口 ${port} 空闲"
+  fi
+  puid=$(app_env PUID || echo 1000)
+  pgid=$(app_env PGID || echo 1000)
+  if [ "$(stat_owner "$APP_HOME/data")" = "$puid:$pgid" ]; then
+    doctor_line ok "data/ 属主与运行身份一致"
+  else
+    doctor_line fail "data/ 属主与运行身份 ${puid}:${pgid} 不一致"
+  fi
+  if [ "$DOCTOR_FAILED" = 0 ]; then echo "自检全部通过"; else echo "发现 ${DOCTOR_FAILED} 项问题"; return 1; fi
+}
+
+# 删除安装目录前的最后一道校验：不是禁止路径，且确实是本脚本的安装目录
+safe_remove_home() {
+  if path_forbidden "$APP_HOME" || [ ! -f "$APP_HOME/$STATE_NAME" ]; then
+    err "拒绝删除 ${APP_HOME}"
+    return 1
+  fi
+  rm -rf "$APP_HOME" 2>/dev/null || as_root rm -rf "$APP_HOME"
+  [ ! -e "$APP_HOME" ] && ok "已删除 ${APP_HOME}"
+}
+
+cmd_uninstall() {
+  local dst="$BIN_DIR/$APP_NAME" typed
+  confirm "停止并删除容器？（数据与配置保留）" n || return 0
+  compose down || return 1
+  if [ -f "$dst" ] && grep -qF "$(sh_quote "$APP_HOME/$SCRIPT_NAME")" "$dst"; then
+    rm -f "$dst" 2>/dev/null || as_root rm -f "$dst"
+  fi
+  ok "容器已移除，安装目录仍保留: ${APP_HOME}"
+  confirm "连同安装目录一起删除？其中的数据将永久丢失" n || return 0
+  echo "即将删除 ${APP_HOME} 下的全部内容:"
+  find "$APP_HOME" -mindepth 1 -maxdepth 1 | sed 's#.*/#  #'
+  typed=$(ask "请输入安装目录名 $(basename "$APP_HOME") 以确认" "") || return 0
+  [ "$typed" = "$(basename "$APP_HOME")" ] || { warn "输入不符，已放弃删除"; return 0; }
+  safe_remove_home
+}
+
+cmd_help() {
+  cat <<EOF
+${APP_NAME} 部署管理脚本 v${SCRIPT_VERSION}
+
+用法: ${APP_NAME} [命令] [选项]      不带命令：未安装时进入安装向导，已安装时进入菜单
+
+  install              安装向导
+  start                启动
+  stop                 停止
+  restart              重建容器并启动（修改 .env 后用它生效）
+  status               查看状态
+  logs [-f]            查看最近日志，-f 持续跟随
+  upgrade [--to 版本]  升级到最新正式版，或切换到指定版本
+  doctor               环境自检
+  uninstall            卸载
+  version              脚本版本号
+
+选项:
+  --dir <目录>         指定安装目录
+EOF
+}
+
+main_menu() {
+  local choice
+  while :; do
+    echo
+    echo "=== ${APP_NAME} v${SCRIPT_VERSION} · ${APP_HOME} ==="
+    echo "  1) 启动    2) 停止    3) 重启    4) 状态    5) 日志"
+    echo "  6) 升级    7) 自检    8) 卸载    0) 退出"
+    choice=$(ask "请选择" 0) || return 0
+    case "$choice" in
+      1) cmd_start ;;
+      2) cmd_stop ;;
+      3) cmd_restart ;;
+      4) cmd_status ;;
+      5) cmd_logs ;;
+      6) cmd_upgrade ;;
+      7) cmd_doctor ;;
+      8) cmd_uninstall; [ -e "$APP_HOME" ] || return 0 ;;
+      0) return 0 ;;
+    esac
+  done
+}
+
+# ===== 6. 入口 =====
+
+parse_args() {
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --dir) [ $# -ge 2 ] || { err "--dir 需要一个目录"; return 1; }; OPT_DIR="$2"; shift 2 ;;
+      --to) [ $# -ge 2 ] || { err "--to 需要一个版本号"; return 1; }; OPT_TO="$2"; shift 2 ;;
+      -f | --follow) OPT_FOLLOW=1; shift ;;
+      -h | --help) CMD=help; shift ;;
+      -*) err "未知选项: $1"; return 1 ;;
+      *) if [ -z "$CMD" ]; then CMD="$1"; shift; else err "多余的参数: $1"; return 1; fi ;;
+    esac
+  done
+}
+
+main() {
+  local home
+  parse_args "$@" || exit 2
+  case "$CMD" in
+    help) cmd_help; return 0 ;;
+    version) printf '%s\n' "$SCRIPT_VERSION"; return 0 ;;
+  esac
+
+  home=$(home_candidate)
+  if [ -n "$home" ] && [ "$(dir_state "$home")" = installed ]; then
+    APP_HOME="$home"
+    if [ ! -w "$APP_HOME" ]; then
+      err "当前用户对 ${APP_HOME} 没有写权限，请改用: sudo ${APP_NAME} ${CMD}"
+      return 1
+    fi
+    case "$CMD" in
+      "" | install) require_docker && main_menu ;;
+      doctor) cmd_doctor ;;
+      start | stop | restart | status | logs | upgrade | uninstall) require_docker && "cmd_$CMD" ;;
+      *) err "未知命令: ${CMD}"; return 2 ;;
+    esac
+    return
+  fi
+
+  case "$CMD" in
+    # 新装的默认目录只取显式给出的，不取脚本所在目录——在仓库里跑时那是仓库的部署目录
+    "" | install) cmd_install "${OPT_DIR:-${{{APP_ENV_PREFIX}}_HOME:-}}" ;;
+    start | stop | restart | status | logs | upgrade | doctor | uninstall)
+      err "尚未安装。请先运行安装，或用 --dir 指定安装目录"
+      return 1
+      ;;
+    *) err "未知命令: ${CMD}"; return 2 ;;
+  esac
+}
+
+if [ "${{{APP_ENV_PREFIX}}_SOURCE_ONLY:-}" != "1" ]; then
+  main "$@"
+fi

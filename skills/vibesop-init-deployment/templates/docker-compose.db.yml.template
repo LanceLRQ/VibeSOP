@@ -1,0 +1,39 @@
+# {{PROJECT_SLUG}} — {{ENV_NAME}} 数据库 / 中间件编排
+# 常驻运行，独立于应用生命周期。本文件创建固定名网络，应用与灰度 compose 以 external 方式加入。
+# 以 PostgreSQL 为例；其他数据库按同样结构替换镜像、数据目录与初始化方式。
+
+services:
+  database:
+    image: {{DB_IMAGE}}
+    container_name: {{PREFIX}}-{{ENV_NAME}}-database
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      TZ: Asia/Shanghai
+    volumes:
+      # 容器内数据路径随镜像大版本而变（PostgreSQL 18 起是 /var/lib/postgresql，17 及更早是 /var/lib/postgresql/data），
+      # 按所选版本的镜像文档填写。该目录由数据库镜像自行管理属主，不要 chown 给应用 uid
+      - ${DEPLOY_DATA_DIR:-{{DATA_ROOT}}}/db_data:{{DB_DATA_PATH}}
+      # 首次启动时执行：创建应用账号（非超管）、应用库、备份专用账号
+      - ./db-init:/docker-entrypoint-initdb.d:ro
+    secrets:
+      - postgres_password
+      - app_password
+      - backup_password
+    ports:
+      # 仅供宿主机上的迁移工具与备份脚本访问；应用走 Docker 网络内的容器名 + 容器内端口
+      - "127.0.0.1:{{DB_HOST_PORT}}:5432"
+
+networks:
+  default:
+    name: {{PREFIX}}-{{ENV_NAME}}-network
+
+secrets:
+  postgres_password:
+    file: ${DEPLOY_SECRETS_DIR:-{{SECRETS_DIR}}}/postgres_password.txt
+  app_password:
+    file: ${DEPLOY_SECRETS_DIR:-{{SECRETS_DIR}}}/app_password.txt
+  backup_password:
+    file: ${DEPLOY_SECRETS_DIR:-{{SECRETS_DIR}}}/backup_password.txt

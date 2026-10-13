@@ -1,0 +1,101 @@
+#!/bin/bash
+# {{PROJECT_SLUG}} — 本地开发环境管理脚本
+# 用法: ./dev.sh <命令>     不带参数显示帮助
+
+set -e
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/{{SCRIPT_TO_ROOT}}" && pwd)"
+
+# 开发机的 .env 固定在项目根（服务器上的仓库外路径不适用于开发机）
+ENV_FILE="${DEPLOY_ENV_FILE:-$PROJECT_ROOT/.env}"
+if [ -f "$ENV_FILE" ]; then
+  set -a
+  # shellcheck disable=SC1090
+  . "$ENV_FILE"
+  set +a
+fi
+
+PROJECT_SLUG="{{PROJECT_SLUG}}"
+PREFIX="{{PREFIX}}"
+DEFAULT_SERVICE="{{SERVICE}}"
+ENV_DIR="$PROJECT_ROOT/{{DEPLOY_DIR}}/dev"
+COMPOSE_FILE="$ENV_DIR/docker-compose.dev.yml"
+SECRETS_DIR="$ENV_DIR/secrets"
+
+die() { echo "[X] $*" >&2; exit 1; }
+
+if docker compose version >/dev/null 2>&1; then
+  DC=(docker compose)
+elif command -v docker-compose >/dev/null 2>&1; then
+  DC=(docker-compose)
+else
+  die "未找到 docker compose，请先安装 Docker Compose"
+fi
+
+COMPOSE=("${DC[@]}")
+[ -f "$ENV_FILE" ] && COMPOSE+=(--env-file "$ENV_FILE")
+COMPOSE+=(-f "$COMPOSE_FILE" -p "$PREFIX-dev")
+
+# 从示例文件复制出真实文件（已存在的跳过），并准备本地数据目录
+#   <名>.example.txt → <名>.txt（密码）    <名>.env.example → <名>.env（服务运行时环境变量）
+init_dev() {
+  mkdir -p "$ENV_DIR/local"
+  local example target
+  for example in "$SECRETS_DIR"/*.example.txt "$SECRETS_DIR"/*.env.example; do
+    [ -e "$example" ] || continue
+    case "$example" in
+      *.example.txt) target="${example%.example.txt}.txt";;
+      *)             target="${example%.example}";;
+    esac
+    if [ -f "$target" ]; then
+      echo "[-] 已存在: $(basename "$target")"
+    else
+      cp "$example" "$target"
+      echo "[*] 已创建: $(basename "$target")"
+    fi
+  done
+  if [ ! -f "$ENV_FILE" ] && [ -f "$PROJECT_ROOT/.env.example" ]; then
+    cp "$PROJECT_ROOT/.env.example" "$ENV_FILE"
+    echo "[*] 已从 .env.example 创建 ${ENV_FILE}，请按需填写"
+  fi
+  echo "[OK] 开发环境初始化完成，执行 '$0 start' 启动"
+}
+
+show_help() {
+  cat <<EOF
+$PROJECT_SLUG — 本地开发环境
+
+用法: $0 <命令> [参数]
+
+  init                     准备密钥文件、本地数据目录与 .env
+  start|up [服务...]       启动
+  stop [服务...]           停止
+  down                     停止并移除容器
+  restart [服务...]        重启
+  build [服务...]          重建开发镜像
+  ps                       状态
+  logs [参数...]           日志（默认 -f --tail=200）
+  exec <服务> <命令...>    在容器内执行命令
+  bash [服务]              进入容器 shell（默认 ${DEFAULT_SERVICE}）
+  compose <参数...>        透传给 docker compose
+EOF
+}
+
+cmd="${1:-help}"
+shift || true
+
+case "$cmd" in
+  help|-h|--help) show_help;;
+  init)      init_dev;;
+  start|up)  "${COMPOSE[@]}" up -d "$@";;
+  stop)      "${COMPOSE[@]}" stop "$@";;
+  down)      "${COMPOSE[@]}" down "$@";;
+  restart)   "${COMPOSE[@]}" restart "$@";;
+  build)     "${COMPOSE[@]}" build "$@";;
+  ps)        "${COMPOSE[@]}" ps "$@";;
+  logs)      if [ $# -eq 0 ]; then "${COMPOSE[@]}" logs -f --tail=200; else "${COMPOSE[@]}" logs "$@"; fi;;
+  exec)      "${COMPOSE[@]}" exec "$@";;
+  bash)      "${COMPOSE[@]}" exec "${1:-$DEFAULT_SERVICE}" sh -c 'command -v bash >/dev/null && exec bash || exec sh';;
+  compose)   "${COMPOSE[@]}" "$@";;
+  *)         echo "未知命令: $cmd" >&2; show_help; exit 1;;
+esac

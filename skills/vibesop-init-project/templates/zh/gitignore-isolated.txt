@@ -1,0 +1,7 @@
+# >>> vibesop (托管区块：项目治理)
+# 过程文档只留在本机
+docs/_internal/
+# 个人 AI 助手文件
+CLAUDE.local.md
+.claude/
+# <<< vibesop

@@ -1,0 +1,51 @@
+# {{PROJECT_NAME}}
+
+{{PROJECT_ONE_LINER}}
+<!-- >>> MAP -->
+
+## 路径职责
+
+| 路径 | 职责 |
+|---|---|
+{{MAP_ROWS}}
+<!-- <<< MAP -->
+<!-- >>> CONVENTIONS -->
+
+## 约定
+
+{{CONVENTIONS}}
+<!-- <<< CONVENTIONS -->
+<!-- >>> TESTS -->
+
+## 测试
+
+{{TESTS}}
+<!-- <<< TESTS -->
+
+## 完成标准
+
+<!-- >>> DONE_GATE -->
+`{{DONE_COMMAND}}` 通过，改动才算完成。
+<!-- <<< DONE_GATE -->
+<!-- >>> DONE_UNDEFINED -->
+尚未定义检查命令。项目有了之后写在这里。
+<!-- <<< DONE_UNDEFINED -->
+
+## 文档
+
+<!-- >>> LAYOUT_ISOLATED -->
+- 公开文档放在 `docs/`。
+- 过程文档（research、discussion、specs、plans、audit、reference、ui）放在 `docs/_internal/<category>/`。该目录已被 git 忽略：其中的文件和内容不进入提交、拉取请求和公开文件。
+- 索引是 `docs/_internal/README.md`。创建或查找过程文档之前先读它，新文件在其中登记。
+- 工作流类 skill 产出的规格和计划放到 `docs/_internal/specs/` 和 `docs/_internal/plans/`，不论该 skill 默认写到哪里。
+- 本机备注（当前阶段、硬约束、本机路径）在 `docs/_internal/LOCAL.md`。该文件存在时，开工前先读它。
+<!-- <<< LAYOUT_ISOLATED -->
+<!-- >>> LAYOUT_TRACKED -->
+- 过程文档（research、discussion、specs、plans、audit、reference、ui）放在 `{{DOCS_ROOT}}/<category>/`，随代码一起提交。
+- 索引是 `{{DOCS_ROOT}}/README.md`。创建或查找过程文档之前先读它，新文件在其中登记。
+- 工作流类 skill 产出的规格和计划放到 `{{DOCS_ROOT}}/specs/` 和 `{{DOCS_ROOT}}/plans/`，不论该 skill 默认写到哪里。
+<!-- <<< LAYOUT_TRACKED -->
+
+## 语言
+
+{{WORKING_LANGUAGE}}

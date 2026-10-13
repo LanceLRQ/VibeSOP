@@ -1,0 +1,15 @@
+# {{PROJECT_NAME}}
+
+{{PROJECT_ONE_LINER}}
+<!-- >>> STATUS -->
+
+## Status
+
+{{STATUS}}
+<!-- <<< STATUS -->
+<!-- >>> LICENSE -->
+
+## License
+
+{{LICENSE_NAME}}. See [LICENSE](LICENSE).
+<!-- <<< LICENSE -->

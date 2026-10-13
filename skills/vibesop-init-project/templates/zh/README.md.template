@@ -1,0 +1,15 @@
+# {{PROJECT_NAME}}
+
+{{PROJECT_ONE_LINER}}
+<!-- >>> STATUS -->
+
+## 状态
+
+{{STATUS}}
+<!-- <<< STATUS -->
+<!-- >>> LICENSE -->
+
+## 许可
+
+{{LICENSE_NAME}}。详见 [LICENSE](LICENSE)。
+<!-- <<< LICENSE -->

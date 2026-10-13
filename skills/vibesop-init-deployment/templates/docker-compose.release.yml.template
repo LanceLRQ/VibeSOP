@@ -1,0 +1,26 @@
+# {{APP_NAME}} 部署编排。可变项全部在同目录 .env 里（{{APP_NAME}}.sh 生成并维护，也可手改），
+# 本文件通常无需改动。
+services:
+  {{APP_NAME}}:
+    image: ${{{APP_ENV_PREFIX}}_IMAGE:-{{HUB_IMAGE}}}:${{{APP_ENV_PREFIX}}_VERSION:?请在 .env 设置 {{APP_ENV_PREFIX}}_VERSION}
+    container_name: {{APP_NAME}}
+    restart: unless-stopped
+    # 运行身份：容器内用户必须对 data 目录可写
+    user: "${PUID:-1000}:${PGID:-1000}"
+    # 置于 HTTPS 反代之后时把 APP_BIND 设为 127.0.0.1，服务就不会直接暴露在网络上
+    ports:
+      - "${APP_BIND:-0.0.0.0}:${APP_PORT:-{{DEFAULT_PORT}}}:{{CONTAINER_PORT}}"
+    volumes:
+      - ./data:{{DATA_CONTAINER_PATH}}
+    environment:
+      - TZ=${TZ:-UTC}
+      # 应用自己的配置在这里逐项传入：左边是应用读取的变量名，右边是 .env 里的键。
+      # 必填项用 ${键:?提示语}，选填项用 ${键:-}
+      # - <应用变量名>=${ADMIN_PASSWORD:?请在 .env 设置 ADMIN_PASSWORD}
+    # 探测到健康检查接口时启用（命令须是镜像里确实存在的工具）
+    # healthcheck:
+    #   test: ["CMD-SHELL", "<对 {{HEALTH_PATH}} 的探测命令>"]
+    #   interval: 30s
+    #   timeout: 10s
+    #   retries: 3
+    #   start_period: 30s
