@@ -41,6 +41,10 @@ Initialize this project.
 /vibesop-init-project
 ```
 
+Calling by name is the reliable way. Some clients show the model only the skill names, and a request like "get this repository ready to go public" may then be handled without the skill. Without it, a model can rewrite git history and commit on its own.
+
+These skills make repository-level decisions. Run them on the strongest model your client offers.
+
 ## What `vibesop-init-project` sets up
 
 **One decision comes first: visibility.** It selects one of two layouts, which differ by a single directory level.

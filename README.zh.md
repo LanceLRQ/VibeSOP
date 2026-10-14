@@ -41,6 +41,10 @@ Initialize this project.
 /vibesop-init-project
 ```
 
+按名字调用最稳。有些客户端只把 skill 的名字给模型看，这时说一句「帮我做开源前的准备」，模型可能不加载 skill 就自己动手。没有 skill 约束时，它可能直接重写 git 历史并提交。
+
+这两个 skill 做的是仓库级的决定，请用客户端里能力最强的模型来跑。
+
 ## `vibesop-init-project` 做什么
 
 **第一个决定是可见性。** 它决定用哪种形态，两种形态只差一层目录。
