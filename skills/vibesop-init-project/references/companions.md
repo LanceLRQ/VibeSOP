@@ -1,12 +1,14 @@
 # Companions
 
-Read this when step 1 detects companion tools and when you write the Next part of the report.
+Read this when you interpret the companion detection of step 1 and when you write the Next part of the report.
 
-## 1. Detection order
+## 1. Reading the detection result
 
-1. The skills visible in this session.
-2. The skill directories: `~/.claude/skills`, `.claude/skills`, `~/.agents/skills`, `.agents/skills`, and the skill directory of the current client.
-3. `command -v kh` and `~/.kanban-hub/config.yaml`.
+Step 1 gives three things: the skills visible in this session, the names the companion lookup printed, and the two `kh` lookups.
+
+- A companion whose name shows up in the session list or in the lookup output is installed. A directory name may carry a version suffix.
+- The lookup pattern in `SKILL.md` covers the names in sections 3 to 5. A companion added to this file is added to that pattern.
+- kanban-hub is configured on this machine when `command -v kh` prints a path and `~/.kanban-hub/config.yaml` exists.
 
 ## 2. Presentation rules
 

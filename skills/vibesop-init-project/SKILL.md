@@ -42,7 +42,14 @@ This file is in English so that anyone can review it. That says nothing about th
 | Tracked files under `.claude/` | `git ls-files .claude` |
 | `LICENSE`, `README` | present or not |
 | Deployable parts | a Dockerfile or compose file, a server entry point, a database dependency |
-| Companion tools | skills visible in this session, then `references/companions.md` |
+| Companion tools | skills visible in this session, and the companion lookup below this table |
+
+The companion lookup prints the installed companions and nothing else. Run it as written, with the skill directory of the current client added to the `ls` when it is not one of the four. `references/companions.md` tells how to read the output.
+
+```bash
+ls ~/.claude/skills .claude/skills ~/.agents/skills .agents/skills 2>/dev/null | grep -iE 'superpowers|grill-me|frontend-design|ui-ux-pro-max|huashu-design|agent-browser|humanizer|git-guardrails|react-best-practices|postgres-best-practices|kanban-hub|vibesop' | sort -u
+command -v kh; ls ~/.kanban-hub/config.yaml
+```
 
 ### 2. Report and name the entry
 
@@ -160,7 +167,7 @@ Report in five parts:
 1. **Done**: files written and commands run, verbatim.
 2. **Skipped**: what and why.
 3. **Verification**: each row with pass or fail.
-4. **Left for you**: what to review; the first commit as two separate commands, `git add` then `git commit -m "<type>: <summary>"`. The user makes this commit as its author, so the message is that one line and the hand-over ends there: attribution or co-author lines that a client asks an agent to add belong to commits the agent makes itself, and this is not one of them; the push command with the branch name and remote that `git branch --show-current` and `git remote -v` print; anything found that this run did not change.
+4. **Left for you**: what to review; the first commit as two separate commands, `git add` followed by the paths that `git status --short` shows as modified or untracked, each written out, then `git commit -m "<type>: <summary>"`. The user makes this commit as its author, so the message is that one line and the hand-over ends there: attribution or co-author lines that a client asks an agent to add belong to commits the agent makes itself, and this is not one of them; the push command with the branch name and remote that `git branch --show-current` and `git remote -v` print; anything found that this run did not change.
 5. **Next**: relevant companions that are not installed, with their install commands from `references/companions.md`; `vibesop-init-deployment` when deployable parts were detected; kanban-hub when it is not installed.
 
 ## Red lines
