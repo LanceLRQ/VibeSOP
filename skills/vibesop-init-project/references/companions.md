@@ -9,13 +9,14 @@ Step 1 gives three things: the skills visible in this session, the names the com
 - A companion whose name shows up in the session list or in the lookup output is installed. A directory name may carry a version suffix.
 - The lookup pattern in `SKILL.md` covers the names in sections 3 to 5. A companion added to this file is added to that pattern.
 - kanban-hub is configured on this machine when `command -v kh` prints a path and `~/.kanban-hub/config.yaml` exists.
+- CodeGraph is installed when `command -v codegraph` prints a path.
 
 ## 2. Presentation rules
 
 - List the items that are not installed and relate to this project.
 - Choose the variant that matches the conversation language and write its own name, `superpowers-zh` in a Chinese conversation and `superpowers` in an English one.
 - Give each item one sentence of purpose.
-- The user runs the install commands.
+- Install commands default to the user. Phrase the item as an offer, not an order. When the user asks the agent to do the install in this conversation, run the steps as confirmed actions and report the result; a declined or unanswered offer ends there, with the commands left in the report.
 - Every install command names a repository from this file. A search by name returns unrelated repositories that share the name.
 
 ## 3. Workflow frameworks
@@ -62,10 +63,39 @@ Two facts:
 - kanban-hub writes `.kanban-hub/` into `.git/info/exclude` itself, so `.gitignore` stays as it is.
 - It can sync documents that are not committed.
 
-## 6. vibesop-init-deployment
+## 6. CodeGraph
+
+CodeGraph (https://github.com/colbymchenry/codegraph) is a local code knowledge graph for coding agents: tree-sitter parsing into SQLite, exposed as an MCP server. One `codegraph_explore` call returns the relevant source with call paths and blast radius, replacing file-by-file grep and Read. It runs fully local, covers 20+ languages, and auto-syncs as files change.
+
+| State | Handling |
+|---|---|
+| `command -v codegraph` prints a path | installed; do not suggest it |
+| no path, and the project has source code | offer it in the Next part as a question: what it is (a local code-graph MCP tool), what it saves (one query instead of file-by-file reading; fewer tool calls and tokens), the one cost (dense responses stay resident in the context window), then ask whether to install it. Adapt the wording; do not recite this file |
+| greenfield with no code yet | do not offer it; there is nothing to index |
+
+When the user says yes to the install:
+
+1. Show the steps below as plan rows and run them after confirmation. The user may equally choose to run them personally.
+2. `codegraph install` rewrites agent MCP configs; name the clients it reports touching.
+3. Run `codegraph init` in the project directory.
+4. Make sure `.codegraph/` is ignored: add the line to the `# >>> vibesop` block when no existing rule catches it.
+5. Report what was installed, where, and that `codegraph uninstall` reverses all of it.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/colbymchenry/codegraph/main/install.sh | sh   # or: npm i -g @colbymchenry/codegraph
+codegraph install        # wires the MCP server into the agents it detects
+codegraph init           # per project; builds the .codegraph/ index
+```
+
+Two facts:
+
+- `.codegraph/` is a local index: it goes into `.gitignore` and is never committed.
+- Uninstall is one command, `codegraph uninstall`.
+
+## 7. vibesop-init-deployment
 
 Mention `vibesop-init-deployment` under Next when step 1 finds a Dockerfile, a compose file, a server entry point or a database dependency, or when an open-source project will publish container images. A project that deploys to Kubernetes, serverless or pure static hosting gets no mention.
 
-## 7. Skills that write documents into the repository
+## 8. Skills that write documents into the repository
 
 The section "Output paths of other skills" in `references/doc-model.md` lists where their output goes.

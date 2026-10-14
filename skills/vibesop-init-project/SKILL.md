@@ -24,7 +24,7 @@ This file is in English so that anyone can review it. That says nothing about th
 |---|---|
 | Read-only inspection | `git add`, `git commit`, `git push` |
 | `git init -b <branch>` when there is no repository | Anything that rewrites history |
-| `git remote add origin <url>` when there is no `origin` | Installing other skills or tools |
+| `git remote add origin <url>` when there is no `origin` | Installing other skills or tools, unless the user asks this session for the agent to do the install |
 | The rows of the plan table the user confirmed | |
 
 ## Flow
@@ -49,6 +49,7 @@ The companion lookup prints the installed companions and nothing else. Run it as
 ```bash
 ls ~/.claude/skills .claude/skills ~/.agents/skills .agents/skills 2>/dev/null | grep -iE 'superpowers|grill-me|frontend-design|ui-ux-pro-max|huashu-design|agent-browser|humanizer|git-guardrails|react-best-practices|postgres-best-practices|kanban-hub|vibesop' | sort -u
 command -v kh; ls ~/.kanban-hub/config.yaml
+command -v codegraph
 ```
 
 ### 2. Report and name the entry
@@ -59,7 +60,7 @@ Tell the user what was found and what is missing, as a short list. Then name the
 
 | Entry | Condition |
 |---|---|
-| **New project** | no commits, or nothing in the repository beyond a README and a LICENSE |
+| **New project** | no commits, or nothing in the repository beyond a README and a LICENSE. Read `references/next-steps.md`. |
 | **Existing project** | commits plus source or documents, and no governance record. Read `references/existing-project.md`. |
 | **Open-source prep** | the user says the repository is going public, or the recorded visibility changes to open source. Read `references/open-source.md`. |
 | **Check** | governance exists and the user wants it verified. Run steps 1 and 6 only and write nothing. Offer fixes as a plan table. |
@@ -168,7 +169,7 @@ Report in five parts:
 2. **Skipped**: what and why.
 3. **Verification**: each row with pass or fail.
 4. **Left for you**: what to review; the first commit as two separate commands, `git add` followed by the paths that `git status --short` shows as modified or untracked, each written out, then `git commit -m "<type>: <summary>"`. The user makes this commit as its author, so the message is that one line and the hand-over ends there: attribution or co-author lines that a client asks an agent to add belong to commits the agent makes itself, and this is not one of them; the push command with the branch name and remote that `git branch --show-current` and `git remote -v` print; anything found that this run did not change.
-5. **Next**: relevant companions that are not installed, with their install commands from `references/companions.md`; `vibesop-init-deployment` when deployable parts were detected; kanban-hub when it is not installed.
+5. **Next**: relevant companions that are not installed, with their install commands from `references/companions.md`; `vibesop-init-deployment` when deployable parts were detected; kanban-hub when it is not installed. On the new-project entry with no manifest detected, the route of `references/next-steps.md` comes first: requirements, then stack selection, then scaffolding, then `vibesop-init-deployment`.
 
 ## Red lines
 
@@ -186,6 +187,7 @@ Report in five parts:
 | `references/doc-model.md` | choosing the layout, creating or naming a process document, a worktree or doc-site question comes up |
 | `references/agents-md.md` | writing or converting `AGENTS.md`, `CLAUDE.md`, `CLAUDE.local.md` or the local notes |
 | `references/existing-project.md` | entry is Existing project |
+| `references/next-steps.md` | entry is New project and no manifest was detected, or the user asks what comes next or how to choose a stack |
 | `references/open-source.md` | entry is Open-source prep, a `LICENSE` is needed, or a leak is suspected |
 | `references/companions.md` | step 1 companion detection and the Next part of the report |
 | `references/glossary.md` | the conversation or the document language is Chinese |

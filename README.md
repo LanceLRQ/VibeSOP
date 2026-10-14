@@ -2,38 +2,57 @@
 
 English | [中文](README.zh.md)
 
-A set of SOPs for governing a software project, packaged as agent skills. They cover where a project's documents live, which of them stay private, what the AI instruction files say, and how its environments are deployed.
+VibeSOP is a set of project-governance SOPs packaged as agent skills. They cover four areas outside the code itself: how project documents are organized, how public and private content are separated, what the AI instruction files contain, and how the environments are deployed. They are stack-agnostic and apply to new and existing repositories; everything written into a repository is plain text, open to direct review.
 
-VibeSOP is for engineers who already know how to build software. It keeps the project around the code in order. How the code itself gets written is left to the workflow framework you prefer.
+VibeSOP is for engineers with software development experience. Its scope is the project governance around the code; how the code itself is written stays with the workflow framework you prefer.
 
-## What it is and what it is not
+## Use cases
 
-| It is | It is not |
+| Scenario | Skill |
 |---|---|
-| Procedures an agent follows: detect, ask for your choices, show a plan, write, verify, report | A code generator or a project scaffold |
-| Stack-agnostic, for new and existing repositories | A CLI or a fixed tech stack |
-| A few plain files in your repository that you can read in a minute | A framework that takes over your workflow |
-
-## Skills
-
-| Skill | Use it when you are |
-|---|---|
-| [`vibesop-init-project`](skills/vibesop-init-project/SKILL.md) | starting a project, bringing an existing repository under governance, preparing to go public, or checking that nothing private is leaking |
-| [`vibesop-init-deployment`](skills/vibesop-init-deployment/SKILL.md) | setting up Docker-based environments for a web project, or a Docker Hub release with a one-line installer |
-
-Each skill stands alone. Install one or both.
+| Starting a project, with governance and document layout in place from the first commit | `vibesop-init-project` |
+| Bringing an existing repository under governance: document layout, AI instruction files, no re-explaining the context each session | `vibesop-init-project` |
+| Preparing a repository to go public: isolating private content, adding a LICENSE, checking for leaks | `vibesop-init-project` |
+| Auditing a governed repository to confirm no private content is tracked | `vibesop-init-project` |
+| Setting up Docker environments for a web project, or adding gray and intranet ones | `vibesop-init-deployment` |
+| Consolidating scattered deployment files into one layout with scripts | `vibesop-init-deployment` |
+| Publishing images for an open-source project, with a one-line installer | `vibesop-init-deployment` |
 
 ## Install
+
+Prerequisites: Node.js (for npx) and a client that supports agent skills.
 
 ```bash
 npx skills add LanceLRQ/VibeSOP
 ```
 
-The [skills CLI](https://github.com/vercel-labs/skills) asks which skills to install and for which agent. Useful flags: `--skill <name>` for a single skill, `-g` for a global install, `--list` to look before installing.
+The [skills CLI](https://github.com/vercel-labs/skills) asks which skills to install and for which client. The default is the current project, committed and shared with the team; `-g` installs to the user directory, available to every project. Skills take effect in a newly started session.
+
+| Flag | Effect |
+|---|---|
+| `--skill <name>` | install only the named skill; repeatable, `--skill '*'` takes all |
+| `-g` | global install |
+| `-a <client>` | target client, e.g. `-a claude-code`, `-a zcode`, `-a codex` |
+| `--list` | list the skills in the repository without installing |
+| `-y` | skip confirmation prompts |
+
+Verify with `npx skills list`, remove with `npx skills remove`. The two skills stand alone and can be installed separately.
+
+### Installation via your AI client
+
+Send the following text to your AI client as is, and it will carry out the installation:
+
+```text
+Install the two VibeSOP governance skills for me:
+1. Work out which AI client this machine uses (claude-code, zcode, codex, ...), then run
+   npx skills add LanceLRQ/VibeSOP --skill vibesop-init-project --skill vibesop-init-deployment -g -a <client> -y
+2. Run npx skills list -g, confirm both skills are installed, and tell me where they landed.
+Install only; do not run the skills themselves.
+```
 
 ## Use
 
-Say what you want in your own language, or call a skill by name:
+Describe what you need in your own language, or call a skill by name:
 
 ```
 Initialize this project.
@@ -41,65 +60,72 @@ Initialize this project.
 /vibesop-init-project
 ```
 
-Calling by name is the reliable way. Some clients show the model only the skill names, and a request like "get this repository ready to go public" may then be handled without the skill. Without it, a model can rewrite git history and commit on its own.
+Calling by name is the reliable way: some clients show the model only skill names, and natural triggering can fail — see [client compatibility and known issues](docs/compatibility.md). These skills make repository-level decisions, so run them on the strongest model your client offers.
 
-These skills make repository-level decisions. Run them on the strongest model your client offers.
+## The two skills
 
-## What `vibesop-init-project` sets up
+### `vibesop-init-project`: project governance
 
-**One decision comes first: visibility.** It selects one of two layouts, which differ by a single directory level.
+Sets up a document layout, an `AGENTS.md` working contract, a governance record, and a list of check commands that can be run repeatedly. Four entries are supported: new project, existing project, open-source prep, check. Visibility is the decision taken first: process docs live under the ignored `docs/_internal/` or the committed `docs/`, and the two layouts differ by a single directory level.
 
-| Visibility | Process docs | Git |
-|---|---|---|
-| open source, or undecided | `docs/_internal/<category>/` | ignored |
-| private for good | `docs/<category>/` | committed |
+Details: [`docs/vibesop-init-project.md`](docs/vibesop-init-project.md) · procedure: [`skills/vibesop-init-project/SKILL.md`](skills/vibesop-init-project/SKILL.md)
 
-Process docs fall into seven categories: `research`, `discussion`, `specs`, `plans`, `audit`, `reference`, `ui`. Only an index is created up front. A directory appears when its first file is written.
+### `vibesop-init-deployment`: deployment environments
 
-**`AGENTS.md` as a working contract.** It tells an agent where a change goes, which tests it needs and when it is done. `CLAUDE.md` imports it, so every tool reads the same rules. In an existing repository the skill asks before converting anything, and keeps every line you already wrote.
+For web projects with service processes. Starting from a service inventory, it confirms the environments and the image registry in batches, then generates Docker compose environments for local dev, production, and gray or intranet on request, with management scripts. Open-source projects can take the Docker Hub publishing route with a one-line installer.
 
-**A governance record.** Visibility, layout, document language and board are written at the top of the index. The next session reads them from there, and so does the deployment skill.
+Details: [`docs/vibesop-init-deployment.md`](docs/vibesop-init-deployment.md) · procedure: [`skills/vibesop-init-deployment/SKILL.md`](skills/vibesop-init-deployment/SKILL.md)
 
-**A check you can run again.** One list of commands verifies a fresh setup and audits an old one: the ignore rules come from the repository's own `.gitignore`, no tracked file should have been private, no public file points at internal docs.
+## Philosophy
 
-**What stays with you.** `git commit`, `git push` and anything that rewrites history. The skill hands you the commands.
+Both skills follow one working method: detect first, ask next, show a plan, write after an explicit yes, verify with commands, report what actually happened. Facts the repository shows are not asked of the user; only choices are. Questions come in batches of at most four, each with a default and a one-line reason. Nothing is written before the plan table is confirmed.
 
-## What `vibesop-init-deployment` sets up
+The agent is bound by these red lines:
 
-It starts from a service inventory: every process that runs on its own, with its build, port and data directory. From there it asks its questions in small batches and shows a decision table before writing anything.
+- `git commit`, `git push` and history rewrites are executed by the user; the skill only prepares the commands
+- A value that was never asked is not written to disk; there is no silent decision
+- Passwords, keys and tokens go only into ignored files; what enters git is `*.example` templates only
+- The deployment skill stops at generating files: no `docker push`, no logging in to a server, nothing live is touched
 
-| Route | You get |
+How code is written is out of scope. For matters like library choices and scaffolding it points to the workflow skills you already have, each with its source repository named; the full list is in [companion tools](docs/companions.md).
+
+## Boundaries and out-of-scope cases
+
+| Scenario | Reason |
 |---|---|
-| Private project | Management scripts and one compose file per environment: local dev and production by default, intranet and gray on request. Images go to a private registry, or are built on the server. |
-| Open-source project | Public images on Docker Hub, a release pipeline triggered by tags, and a single-file installer your users run with one command. |
+| Writing code, choosing libraries, scaffolding | Only the work around the code is governed; code writing stays with the workflow framework |
+| Kubernetes, serverless, pure static hosting | The deployment skill covers Docker compose deployments only and says so explicitly when it meets one |
+| Unattended runs, or inside CI | Every decision waits for the user's confirmation; it is not an automation script |
+| Expecting it to commit and push | Git operations are deliberately the user's; the skill only prepares the commands |
 
-Kubernetes, serverless and pure static hosting are outside its scope.
+## Related documentation
+
+| Document | Contents |
+|---|---|
+| [Client compatibility and known issues](docs/compatibility.md) | Acceptance results per client; the non-triggering open-source-prep entry, its cause and workaround |
+| [Companion tools](docs/companions.md) | Recommended third-party skills and workflow frameworks, with sources and install commands |
+| [Tech selection guide](docs/tech-selection.md) | The route from requirements to a stack, mainstream candidates per scenario (as of 2026-10), and how to record the decision |
+| [vibesop-init-project in detail](docs/vibesop-init-project.md) | Four entries, decision list, document model, instruction files, check commands |
+| [vibesop-init-deployment in detail](docs/vibesop-init-deployment.md) | Service inventory, environment model, release routes, verification, common mistakes |
 
 ## Language
 
 - Skill bodies are in English, in one copy, so anyone can review them.
-- The agent talks to you in the language you write in.
-- Files written into your repository use the document language you choose. `vibesop-init-project` ships Chinese and English templates.
-- Known gap: the script templates of `vibesop-init-deployment` carry Chinese comments and prompts in this release. For any other document language the skill translates them while generating.
-
-## Companions
-
-VibeSOP does not tell an agent how to write code. `vibesop-init-project` looks at which workflow skills you already have and suggests the ones that fit your project, each with a pinned source. For progress tracking it works with [kanban-hub](https://github.com/lanceLRQ/kanban-hub) when you use it.
-
-## Status
-
-Early release. The acceptance cases are in [`tests/scenarios/`](tests/scenarios/README.md), each in Chinese and English. A report of a run on your client and model is welcome.
+- The agent converses in the user's language; conversation and file language were verified with zero drift.
+- Files written into a repository use the chosen document language. `vibesop-init-project` ships Chinese and English templates.
+- Public documents of this repository exist in English and Chinese: `README.zh.md` is the Chinese README, the rest live under `docs/`.
 
 ## Repository layout
 
 ```
-skills/
-  vibesop-init-project/      SKILL.md, references/, templates/zh, templates/en
-  vibesop-init-deployment/   SKILL.md, references/, templates/
+skills/                      the skills themselves
+  vibesop-init-project/       SKILL.md, references/, templates/zh, templates/en
+  vibesop-init-deployment/    SKILL.md, references/, templates/
+docs/                        public documentation, English and Chinese per topic
 tests/
-  check.mjs                  structure checks
-  make-fixtures.sh           throwaway repositories for the scenarios
-  scenarios/                 acceptance cases
+  check.mjs                   structure checks
+  make-fixtures.sh            throwaway repositories for the scenarios
+  scenarios/                  acceptance cases
 ```
 
 ## Contributing
