@@ -20,6 +20,20 @@ VibeSOP 面向具备软件开发经验的工程师,职责是把代码之外的�
 
 ## 安装
 
+### 由 AI 代为安装
+
+将下面这段文本原样发送给你的 AI 客户端,即可由其完成安装:
+
+```text
+请为我安装 VibeSOP 的两个治理 skill:
+1. 先确认本机正在使用的 AI 客户端(claude-code、zcode、codex 等),然后运行
+   npx skills add LanceLRQ/VibeSOP --skill vibesop-init-project --skill vibesop-init-deployment -g -a <客户端> -y
+2. 运行 npx skills list -g,确认两个 skill 均已安装,并告知安装路径。
+仅执行安装,不要运行这两个 skill 本身。
+```
+
+### 手动安装
+
 前提条件:Node.js(npx 可用),以及一个支持 Agent Skills 的客户端。
 
 ```bash
@@ -37,18 +51,6 @@ npx skills add LanceLRQ/VibeSOP
 | `-y` | 跳过确认 |
 
 安装后可通过 `npx skills list` 确认,通过 `npx skills remove` 卸载。两个 skill 相互独立,可单独安装。
-
-### 由 AI 代为安装
-
-将下面这段文本原样发送给你的 AI 客户端,即可由其完成安装:
-
-```text
-请为我安装 VibeSOP 的两个治理 skill:
-1. 先确认本机正在使用的 AI 客户端(claude-code、zcode、codex 等),然后运行
-   npx skills add LanceLRQ/VibeSOP --skill vibesop-init-project --skill vibesop-init-deployment -g -a <客户端> -y
-2. 运行 npx skills list -g,确认两个 skill 均已安装,并告知安装路径。
-仅执行安装,不要运行这两个 skill 本身。
-```
 
 ## 使用
 

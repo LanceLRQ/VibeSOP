@@ -6,6 +6,10 @@ VibeSOP is a set of project-governance SOPs packaged as agent skills. They cover
 
 VibeSOP is for engineers with software development experience. Its scope is the project governance around the code; how the code itself is written stays with the workflow framework you prefer.
 
+VibeSOP 是一组项目治理 SOP,以 Agent Skill 的形式发布,覆盖代码之外的四个方面:项目文档的组织与存放、公开与私有内容的隔离、AI 指令文件的内容,以及各套环境的部署。它不依赖特定技术栈,新建与存量仓库均适用;写入仓库的产物全部是纯文本文件,可以直接审阅。
+
+VibeSOP 面向具备软件开发经验的工程师,职责是把代码之外的项目事务纳入统一治理;代码本身如何编写,仍由你惯用的流程框架决定。
+
 ## Use cases
 
 | Scenario | Skill |
@@ -19,6 +23,20 @@ VibeSOP is for engineers with software development experience. Its scope is the 
 | Publishing images for an open-source project, with a one-line installer | `vibesop-init-deployment` |
 
 ## Install
+
+### Installation via your AI client
+
+Send the following text to your AI client as is, and it will carry out the installation:
+
+```text
+Install the two VibeSOP governance skills for me:
+1. Work out which AI client this machine uses (claude-code, zcode, codex, ...), then run
+   npx skills add LanceLRQ/VibeSOP --skill vibesop-init-project --skill vibesop-init-deployment -g -a <client> -y
+2. Run npx skills list -g, confirm both skills are installed, and tell me where they landed.
+Install only; do not run the skills themselves.
+```
+
+### Manual install
 
 Prerequisites: Node.js (for npx) and a client that supports agent skills.
 
@@ -38,25 +56,12 @@ The [skills CLI](https://github.com/vercel-labs/skills) asks which skills to ins
 
 Verify with `npx skills list`, remove with `npx skills remove`. The two skills stand alone and can be installed separately.
 
-### Installation via your AI client
-
-Send the following text to your AI client as is, and it will carry out the installation:
-
-```text
-Install the two VibeSOP governance skills for me:
-1. Work out which AI client this machine uses (claude-code, zcode, codex, ...), then run
-   npx skills add LanceLRQ/VibeSOP --skill vibesop-init-project --skill vibesop-init-deployment -g -a <client> -y
-2. Run npx skills list -g, confirm both skills are installed, and tell me where they landed.
-Install only; do not run the skills themselves.
-```
-
 ## Use
 
 Describe what you need in your own language, or call a skill by name:
 
 ```
 Initialize this project.
-帮我把这个老项目接入文档治理。
 /vibesop-init-project
 ```
 
